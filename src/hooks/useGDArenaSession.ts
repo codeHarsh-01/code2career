@@ -9,6 +9,8 @@ import { useSpeechRecognition } from './useSpeechRecognition';
 import { useSpeechSynthesis } from './useSpeechSynthesis';
 import { getNextSpeakerTurn, generateFeedbackReport } from '../services/llm';
 
+export const TURN_SEQUENCE: Array<'AI_1' | 'AI_2' | 'USER'> = ['AI_1', 'AI_2', 'USER'];
+
 interface UseGDArenaSessionProps {
   config: SessionConfig;
   onSessionComplete: (report: FeedbackReportData, transcript: Message[]) => void;
@@ -28,48 +30,53 @@ export function useGDArenaSession({
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState<boolean>(false);
   const [interruptionsHandled, setInterruptionsHandled] = useState<number>(0);
 
-  const silencePromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isAITurnInProgressRef = useRef<boolean>(false);
+  // 1. Strict Turn-Based State Management:
+  // Loop: AI 1 (index 0) -> AI 2 (index 1) -> User (index 2)
+  const [currentTurnIndex, setCurrentTurnIndex] = useState<number>(0);
+  const [isWaitingForUser, setIsWaitingForUser] = useState<boolean>(false);
+
   const transcriptRef = useRef<Message[]>([]);
   transcriptRef.current = transcript;
 
+  const isAITurnInProgressRef = useRef<boolean>(false);
+
   const { speak, cancel: cancelSpeech, isSpeaking: isAISpeaking } = useSpeechSynthesis();
 
-  // Handle when user starts speaking while AI is speaking (Interruption event!)
-  const handleUserSpeechStart = useCallback(() => {
-    if (isAISpeaking) {
-      console.log('User interrupted AI speech! Yielding floor to candidate.');
-      cancelSpeech();
-      setInterruptionsHandled(prev => prev + 1);
-    }
-    setPreparingSpeaker(null);
-    setActiveSpeaker(config.userName);
-    setStatus('listening');
-
-    // Clear any pending silence timer
-    if (silencePromptTimerRef.current) {
-      clearTimeout(silencePromptTimerRef.current);
-    }
-  }, [isAISpeaking, cancelSpeech, config.userName]);
-
-  // Handle completed user utterance (pause detected)
-  const handleUserSpeechComplete = useCallback((finalText: string) => {
-    if (!finalText || finalText.trim().length === 0) return;
+  // 3. User Submission Handler (Unlocking the loop)
+  const handleUserSubmission = useCallback((text: string) => {
+    if (!text || text.trim().length === 0) return;
 
     const userMessage: Message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       speaker: config.userName,
-      text: finalText.trim(),
+      text: text.trim(),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       isUser: true,
     };
 
     setTranscript(prev => [...prev, userMessage]);
+    setIsWaitingForUser(false);
     setActiveSpeaker(null);
+    setPreparingSpeaker(null);
 
-    // Trigger AI response to the user's input
-    triggerAITurn(userMessage.speaker);
+    // Reset currentTurnIndex back to 0 (AI 1's turn)
+    setCurrentTurnIndex(0);
   }, [config.userName]);
+
+  // STT callback when user starts speaking
+  const handleUserSpeechStart = useCallback(() => {
+    if (isAISpeaking) {
+      console.log('User interrupted AI speech! Yielding floor.');
+      cancelSpeech();
+      setInterruptionsHandled(prev => prev + 1);
+    }
+    setActiveSpeaker(config.userName);
+  }, [isAISpeaking, cancelSpeech, config.userName]);
+
+  // STT callback when user finishes speaking (pause detected)
+  const handleUserSpeechComplete = useCallback((finalText: string) => {
+    handleUserSubmission(finalText);
+  }, [handleUserSubmission]);
 
   const {
     isSupported: isSpeechSupported,
@@ -86,145 +93,150 @@ export function useGDArenaSession({
     pauseThresholdMs: 1700,
   });
 
-  // Orchestrate AI Turn
-  const triggerAITurn = useCallback(async (lastSpeakerName?: string) => {
-    if (isAITurnInProgressRef.current) return;
-    isAITurnInProgressRef.current = true;
+  // 2. The Strict Conversation Loop via React useEffect:
+  // AI 1 -> AI 2 -> User -> AI 1 -> AI 2 -> User ...
+  useEffect(() => {
+    if (!isTimerRunning) return;
 
-    // Determine candidate AI who intends to speak / raises hand while LLM thinks
-    const eligible = config.selectedPersonalities.filter(p => p.name !== lastSpeakerName);
-    const intentPersona = eligible.length > 0
-      ? eligible[Math.floor(Math.random() * eligible.length)]
-      : config.selectedPersonalities[0];
-    setPreparingSpeaker(intentPersona.name);
+    const currentTurn = TURN_SEQUENCE[currentTurnIndex];
 
-    setStatus('ai_thinking');
-    setActiveSpeaker(null);
-
-    try {
-      const response = await getNextSpeakerTurn(
-        config.topic,
-        config.selectedPersonalities,
-        transcriptRef.current,
-        lastSpeakerName
-      );
-
-      const speakerPersona = config.selectedPersonalities.find(
-        p => p.name.toLowerCase() === response.speaker.toLowerCase()
-      ) || intentPersona;
-
-      const aiMessage: Message = {
-        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        speaker: speakerPersona.name,
-        text: response.dialogue,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        isUser: false,
-        personalityId: speakerPersona.id,
-      };
-
-      setTranscript(prev => [...prev, aiMessage]);
-      setPreparingSpeaker(null);
-      setStatus('ai_speaking');
-      setActiveSpeaker(speakerPersona.name);
-
-      // Speak aloud using Web Speech API TTS
-      speak(
-        response.dialogue,
-        speakerPersona,
-        () => {
-          // On speech start
-          setPreparingSpeaker(null);
-          setActiveSpeaker(speakerPersona.name);
-          setStatus('ai_speaking');
-        },
-        () => {
-          // On speech finish
-          setActiveSpeaker(null);
-          setPreparingSpeaker(null);
-          setStatus('idle');
-          isAITurnInProgressRef.current = false;
-
-          // If silence lingers for 8 seconds and user doesn't chime in, have another participant speak
-          if (silencePromptTimerRef.current) clearTimeout(silencePromptTimerRef.current);
-          silencePromptTimerRef.current = setTimeout(() => {
-            if (!isAITurnInProgressRef.current) {
-              triggerAITurn(speakerPersona.name);
-            }
-          }, 8000);
-        }
-      );
-    } catch (err) {
-      console.error('Failed AI turn:', err);
-      setStatus('idle');
+    // CASE 1: When it is the User's turn (index 2)
+    if (currentTurn === 'USER') {
+      setIsWaitingForUser(true);
+      setStatus('listening');
       setActiveSpeaker(null);
       setPreparingSpeaker(null);
       isAITurnInProgressRef.current = false;
-    }
-  }, [config.topic, config.selectedPersonalities, speak]);
 
-  // Manual trigger: "Force AI to Speak"
+      // Ensure microphone is listening if unmuted
+      if (!userIsMuted) {
+        startListening();
+      }
+      return; // Strictly halt all LLM API calls. The system pauses completely.
+    }
+
+    // CASE 2: When it is an AI's turn (index 0 for AI_1, index 1 for AI_2)
+    setIsWaitingForUser(false);
+
+    // Map AI_1 to first selected persona, AI_2 to second selected persona
+    const ai1 = config.selectedPersonalities[0];
+    const ai2 = config.selectedPersonalities[1] || config.selectedPersonalities[0];
+    const currentAI = currentTurn === 'AI_1' ? ai1 : ai2;
+
+    let isEffectActive = true;
+    isAITurnInProgressRef.current = true;
+
+    const executeAITurn = async () => {
+      setStatus('ai_thinking');
+      setPreparingSpeaker(currentAI.name);
+      setActiveSpeaker(null);
+
+      try {
+        // Trigger the LLM API to generate a response for this specific AI
+        const response = await getNextSpeakerTurn(
+          config.topic,
+          config.selectedPersonalities,
+          transcriptRef.current,
+          undefined,
+          currentAI
+        );
+
+        if (!isEffectActive) return;
+
+        const aiMessage: Message = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          speaker: currentAI.name,
+          text: response.dialogue,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          isUser: false,
+          personalityId: currentAI.id,
+        };
+
+        // Append to transcript
+        setTranscript(prev => [...prev, aiMessage]);
+        setStatus('ai_speaking');
+        setActiveSpeaker(currentAI.name);
+        setPreparingSpeaker(null);
+
+        // Speak using TTS
+        speak(
+          response.dialogue,
+          currentAI,
+          () => {
+            if (isEffectActive) {
+              setActiveSpeaker(currentAI.name);
+              setStatus('ai_speaking');
+            }
+          },
+          () => {
+            // Once TTS finishes speaking, automatically increment currentTurnIndex
+            if (isEffectActive) {
+              setActiveSpeaker(null);
+              setPreparingSpeaker(null);
+              setStatus('idle');
+              isAITurnInProgressRef.current = false;
+
+              // Automatically advance to the next turn in sequence (0 -> 1 -> 2)
+              setCurrentTurnIndex(prev => (prev + 1) % TURN_SEQUENCE.length);
+            }
+          }
+        );
+      } catch (err) {
+        console.error('Error during AI turn:', err);
+        if (isEffectActive) {
+          setStatus('idle');
+          setActiveSpeaker(null);
+          setPreparingSpeaker(null);
+          isAITurnInProgressRef.current = false;
+          // Advance on error to prevent deadlock
+          setCurrentTurnIndex(prev => (prev + 1) % TURN_SEQUENCE.length);
+        }
+      }
+    };
+
+    executeAITurn();
+
+    return () => {
+      isEffectActive = false;
+    };
+  }, [
+    currentTurnIndex,
+    isTimerRunning,
+    config.topic,
+    config.selectedPersonalities,
+    userIsMuted,
+    startListening,
+    speak,
+  ]);
+
+  // Manual text submission from chat input
+  const submitTextTurn = useCallback((text: string) => {
+    handleUserSubmission(text);
+  }, [handleUserSubmission]);
+
+  // "Force AI to Speak" / Skip user turn if user passes
   const forceAIToSpeak = useCallback(() => {
     const pendingText = flushCurrentSpeech();
     if (pendingText && pendingText.trim().length > 0) {
-      handleUserSpeechComplete(pendingText);
-    } else {
-      triggerAITurn();
+      handleUserSubmission(pendingText);
+    } else if (isWaitingForUser) {
+      // User passes floor; unlock loop and jump back to AI_1
+      setIsWaitingForUser(false);
+      setCurrentTurnIndex(0);
     }
-  }, [flushCurrentSpeech, handleUserSpeechComplete, triggerAITurn]);
-
-  // Manual text fallback send (if mic is denied or noisy room)
-  const submitTextTurn = useCallback((text: string) => {
-    if (!text.trim()) return;
-    const userMessage: Message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      speaker: config.userName,
-      text: text.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      isUser: true,
-    };
-
-    setTranscript(prev => [...prev, userMessage]);
-    triggerAITurn(config.userName);
-  }, [config.userName, triggerAITurn]);
+  }, [flushCurrentSpeech, handleUserSubmission, isWaitingForUser]);
 
   // Session start lifecycle
   const startSession = useCallback(() => {
     setIsTimerRunning(true);
+    setTranscript([]);
+    setCurrentTurnIndex(0); // Starts at AI_1
+    setIsWaitingForUser(false);
+
     if (!userIsMuted) {
       startListening();
     }
-
-    // Seed the discussion with the Moderator's opening remark
-    const moderator = config.selectedPersonalities.find(p => p.id === 'moderator') || config.selectedPersonalities[0];
-    const initialGreeting = `Good morning team. We have 10 minutes to discuss: "${config.topic}". Let's explore the key trade-offs and reach a constructive consensus. Who would like to open the floor?`;
-
-    const seedMsg: Message = {
-      id: `msg-seed-${Date.now()}`,
-      speaker: moderator.name,
-      text: initialGreeting,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      isUser: false,
-      personalityId: moderator.id,
-    };
-
-    setTranscript([seedMsg]);
-
-    // Speak initial remark
-    setTimeout(() => {
-      speak(
-        initialGreeting,
-        moderator,
-        () => {
-          setActiveSpeaker(moderator.name);
-          setStatus('ai_speaking');
-        },
-        () => {
-          setActiveSpeaker(null);
-          setStatus('idle');
-        }
-      );
-    }, 600);
-  }, [config.durationSeconds, config.topic, config.selectedPersonalities, userIsMuted, startListening, speak]);
+  }, [userIsMuted, startListening]);
 
   // Toggle user microphone
   const toggleMute = useCallback(() => {
@@ -244,7 +256,6 @@ export function useGDArenaSession({
     setIsTimerRunning(false);
     stopListening();
     cancelSpeech();
-    if (silencePromptTimerRef.current) clearTimeout(silencePromptTimerRef.current);
 
     setIsGeneratingFeedback(true);
     setStatus('idle');
@@ -267,9 +278,17 @@ export function useGDArenaSession({
     } finally {
       setIsGeneratingFeedback(false);
     }
-  }, [config.durationSeconds, config.topic, config.userName, timeRemaining, stopListening, cancelSpeech, onSessionComplete]);
+  }, [
+    config.durationSeconds,
+    config.topic,
+    config.userName,
+    timeRemaining,
+    stopListening,
+    cancelSpeech,
+    onSessionComplete,
+  ]);
 
-  // Session 10-minute timer countdown
+  // 10-minute session timer
   useEffect(() => {
     if (!isTimerRunning) return;
 
@@ -302,6 +321,9 @@ export function useGDArenaSession({
     speechError,
     permissionDenied,
     interruptionsHandled,
+    currentTurnIndex,
+    isWaitingForUser,
+    turnSequence: TURN_SEQUENCE,
     startSession,
     toggleMute,
     forceAIToSpeak,

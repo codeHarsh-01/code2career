@@ -25,13 +25,14 @@ export async function getNextSpeakerTurn(
   topic: string,
   participants: Participant[],
   transcript: Message[],
-  lastSpeakerName?: string
+  lastSpeakerName?: string,
+  targetSpeaker?: Participant
 ): Promise<NextSpeakerResponse> {
   const apiKey = getStoredApiKey();
 
   // If no API key is provided, use the high-quality local simulated GD engine
   if (!apiKey) {
-    return simulateNextTurn(topic, participants, transcript, lastSpeakerName);
+    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
   }
 
   const personalitiesDescription = participants
@@ -44,6 +45,10 @@ export async function getNextSpeakerTurn(
         .map(m => `${m.speaker}: "${m.text}"`)
         .join('\n');
 
+  const speakerInstruction = targetSpeaker
+    ? `You MUST strictly generate the dialogue for the participant: "${targetSpeaker.name}" (${targetSpeaker.role}).\nParticipant behavior guide: ${targetSpeaker.promptInstruction}`
+    : `Select ONE AI participant who should naturally speak next based on momentum, conflicting views, or to draw in quieter opinions. Do NOT repeat the same speaker if possible (Last speaker: ${lastSpeakerName || 'None'}).`;
+
   const systemPrompt = `You are simulating a realistic, professional Group Discussion (GD) room.
 Topic: "${topic}"
 
@@ -51,14 +56,12 @@ The participants in the discussion are:
 ${personalitiesDescription}
 
 Rules:
-1. Act as the discussion orchestrator. Review the transcript history carefully.
-2. Select ONE AI participant who should naturally speak next based on momentum, conflicting views, or to draw in quieter opinions.
-3. Do NOT have the same speaker speak twice in a row if possible (Last speaker: ${lastSpeakerName || 'None'}).
-4. Generate their exact dialogue in direct reaction to what was just said. Address or respectfully challenge the Candidate (User) or other peers directly when appropriate.
-5. Keep responses concise and fast-paced: strictly 1 to 3 sentences (maximum 40 words). Never write long monologues.
-6. Return ONLY a valid JSON object matching this schema:
+1. ${speakerInstruction}
+2. Generate their exact dialogue in direct reaction to what was just said in the transcript. Address or respectfully challenge the Candidate (User) or other peers directly when appropriate.
+3. Keep responses concise and fast-paced: strictly 1 to 3 sentences (maximum 40 words). Never write long monologues.
+4. Return ONLY a valid JSON object matching this schema:
 {
-  "speaker": "Name of AI Participant",
+  "speaker": "${targetSpeaker ? targetSpeaker.name : 'Name of AI Participant'}",
   "dialogue": "Exact dialogue to be spoken out loud."
 }`;
 
@@ -283,13 +286,17 @@ function simulateNextTurn(
   _topic: string,
   participants: Participant[],
   transcript: Message[],
-  lastSpeakerName?: string
+  lastSpeakerName?: string,
+  targetSpeaker?: Participant
 ): NextSpeakerResponse {
-  // Filter eligible participants (avoiding repeating the immediate last speaker)
-  const eligible = participants.filter(p => p.name !== lastSpeakerName);
-  const selected = eligible.length > 0
-    ? eligible[Math.floor(Math.random() * eligible.length)]
-    : participants[0];
+  // If a target speaker is specified, use them directly
+  let selected = targetSpeaker;
+  if (!selected) {
+    const eligible = participants.filter(p => p.name !== lastSpeakerName);
+    selected = eligible.length > 0
+      ? eligible[Math.floor(Math.random() * eligible.length)]
+      : participants[0];
+  }
 
   const lastUserMsg = [...transcript].reverse().find(m => m.isUser);
   const snippet = lastUserMsg ? lastUserMsg.text.slice(0, 40) + '...' : 'the core problem';

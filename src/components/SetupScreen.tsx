@@ -24,7 +24,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
 }) => {
   const [selectedTopicId, setSelectedTopicId] = useState<string>(PRESET_TOPICS[0].id);
   const [customTopicText, setCustomTopicText] = useState<string>('');
-  const [participantCount, setParticipantCount] = useState<number>(4);
+  const [participantCount, setParticipantCount] = useState<number>(2);
   const [userName, setUserName] = useState<string>('Candidate');
   const [isRequestingMic, setIsRequestingMic] = useState<boolean>(false);
 
@@ -149,21 +149,21 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
             {/* Counter Selector */}
             <div className="space-y-2">
               <label className="block text-xs uppercase tracking-wider text-slate-400 font-medium">
-                Number of AI Discussants (3 to 5)
+                Number of AI Discussants (2 for Strict 3-Person Room)
               </label>
-              <div className="grid grid-cols-3 gap-3">
-                {[3, 4, 5].map((count) => (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {[2, 3, 4, 5].map((count) => (
                   <button
                     key={count}
                     type="button"
                     onClick={() => setParticipantCount(count)}
-                    className={`py-2.5 px-4 rounded-xl text-sm font-semibold border transition-all ${
+                    className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-semibold border transition-all ${
                       participantCount === count
                         ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/30'
                         : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
                     }`}
                   >
-                    {count} Discussants
+                    {count} AI {count === 2 ? '⭐ (3-Person)' : ''}
                   </button>
                 ))}
               </div>

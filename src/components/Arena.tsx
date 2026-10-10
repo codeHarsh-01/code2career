@@ -8,9 +8,10 @@ import {
   Send,
   AlertTriangle,
   RotateCw,
-  Hand,
   Layers,
   Sparkles,
+  ArrowRight,
+  UserCheck,
 } from 'lucide-react';
 import type { Participant, Message, SessionConfig, FeedbackReportData } from '../types';
 import { useGDArenaSession } from '../hooks/useGDArenaSession';
@@ -27,8 +28,7 @@ export const Arena: React.FC<ArenaProps> = ({
   onSessionComplete,
 }) => {
   const [textInput, setTextInput] = useState('');
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [hasRaisedHand, setHasRaisedHand] = useState(false);
+  const [autoScroll] = useState(true);
   const transcriptBottomRef = useRef<HTMLDivElement | null>(null);
 
   const {
@@ -41,6 +41,8 @@ export const Arena: React.FC<ArenaProps> = ({
     isGeneratingFeedback,
     interimTranscript,
     permissionDenied,
+    currentTurnIndex,
+    isWaitingForUser,
     startSession,
     toggleMute,
     forceAIToSpeak,
@@ -79,9 +81,11 @@ export const Arena: React.FC<ArenaProps> = ({
       : 'text-indigo-400 border-indigo-500/40 bg-indigo-500/10';
 
   const isUserSpeaking = activeSpeaker === config.userName || Boolean(interimTranscript);
-  const isFloorOpen = !activeSpeaker && !interimTranscript && status !== 'ai_thinking';
 
-  // Combine user and AI participants for room visualization
+  // Identify participants in order: AI_1, AI_2, User
+  const ai1 = config.selectedPersonalities[0];
+  const ai2 = config.selectedPersonalities[1] || config.selectedPersonalities[0];
+
   const userParticipant: Participant = {
     id: 'user',
     name: config.userName,
@@ -105,13 +109,6 @@ export const Arena: React.FC<ArenaProps> = ({
     setTextInput('');
   };
 
-  const handleRaiseHand = () => {
-    setHasRaisedHand(prev => !prev);
-    // If user raises hand, trigger next turn or take the floor
-    if (!hasRaisedHand) {
-      forceAIToSpeak();
-    }
-  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 overflow-hidden">
@@ -158,13 +155,61 @@ export const Arena: React.FC<ArenaProps> = ({
         </div>
       </div>
 
+      {/* Strict Turn Stepper Indicator Bar */}
+      <div className="px-4 py-2 bg-slate-900/95 border-b border-slate-800/80 flex items-center justify-center gap-2 sm:gap-4 overflow-x-auto text-[11px] font-semibold shrink-0">
+        <span className="text-slate-400 text-[10px] uppercase tracking-wider hidden sm:inline">
+          Turn Sequence:
+        </span>
+
+        {/* Step 0: AI 1 */}
+        <div
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all ${
+            currentTurnIndex === 0
+              ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300 ring-2 ring-indigo-500/50 scale-105 shadow-md shadow-indigo-500/20 font-bold'
+              : 'bg-slate-950 border-slate-800 text-slate-500'
+          }`}
+        >
+          <span>1. {ai1?.name || 'AI 1'}</span>
+          {currentTurnIndex === 0 && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />}
+        </div>
+
+        <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
+
+        {/* Step 1: AI 2 */}
+        <div
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all ${
+            currentTurnIndex === 1
+              ? 'bg-purple-600/30 border-purple-500 text-purple-300 ring-2 ring-purple-500/50 scale-105 shadow-md shadow-purple-500/20 font-bold'
+              : 'bg-slate-950 border-slate-800 text-slate-500'
+          }`}
+        >
+          <span>2. {ai2?.name || 'AI 2'}</span>
+          {currentTurnIndex === 1 && <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping" />}
+        </div>
+
+        <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
+
+        {/* Step 2: User */}
+        <div
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all ${
+            currentTurnIndex === 2
+              ? 'bg-emerald-600/30 border-emerald-400 text-emerald-300 ring-2 ring-emerald-400 scale-105 shadow-lg shadow-emerald-500/30 font-bold animate-pulse'
+              : 'bg-slate-950 border-slate-800 text-slate-500'
+          }`}
+        >
+          <UserCheck className="w-3.5 h-3.5" />
+          <span>3. Candidate (You)</span>
+          {currentTurnIndex === 2 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />}
+        </div>
+      </div>
+
       {/* Permission Denied Fallback Banner */}
       {permissionDenied && (
         <div className="px-4 py-2.5 bg-amber-950/80 border-b border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-3 animate-fadeIn">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              Microphone access is blocked. <strong>You can still speak via the Text Input bar below!</strong> To enable voice, click the lock/camera icon in your browser address bar.
+              Microphone access is blocked. <strong>You can still speak via the Text Input bar below!</strong>
             </span>
           </div>
           <button
@@ -180,27 +225,23 @@ export const Arena: React.FC<ArenaProps> = ({
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Left / Top: Circular Discussion Room Pod */}
         <div className="flex-1 relative flex flex-col items-center justify-center p-4 sm:p-6 overflow-hidden bg-radial from-slate-900/60 via-slate-950 to-slate-950">
-          {/* Ambient Arena Glow */}
           <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/5 via-transparent to-purple-500/5 pointer-events-none" />
 
-          {/* Center Pod: Active State & Equalizer */}
+          {/* Center Pod: Active Turn Visual Cues */}
           <div className="relative z-10 text-center max-w-md mb-6 sm:mb-8">
-            {/* Dynamic Status Pill */}
-            {isFloorOpen ? (
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 shadow-lg shadow-emerald-500/10 text-xs font-bold text-emerald-300 animate-pulse mb-2">
-                <span className="relative flex h-2.5 w-2.5">
+            {isWaitingForUser ? (
+              <div className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full bg-emerald-500/20 border-2 border-emerald-400 shadow-xl shadow-emerald-500/25 text-xs sm:text-sm font-black text-emerald-300 animate-pulse mb-2">
+                <span className="relative flex h-3 w-3">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-400"></span>
                 </span>
-                <span>Floor is Open — Jump in!</span>
+                <span>🎯 Your Turn — Please Speak or Type!</span>
               </div>
             ) : activeSpeaker ? (
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/15 border border-indigo-500/40 shadow-lg text-xs font-semibold text-indigo-300 mb-2">
                 <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
                 <span>
-                  {activeSpeaker === config.userName
-                    ? '🎙️ You have the floor (Speaking...)'
-                    : `📢 ${activeSpeaker} is speaking (You can interrupt!)`}
+                  📢 {activeSpeaker} is speaking ({currentTurnIndex === 0 ? 'Turn 1 of 3' : 'Turn 2 of 3'})
                 </span>
               </div>
             ) : (
@@ -208,46 +249,47 @@ export const Arena: React.FC<ArenaProps> = ({
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce" />
                 <span>
                   {preparingSpeaker
-                    ? `✋ ${preparingSpeaker} is preparing to speak...`
-                    : 'Participants are deliberating...'}
+                    ? `✋ ${preparingSpeaker} is generating their point...`
+                    : 'System is orchestrating discussion...'}
                 </span>
               </div>
             )}
 
             {/* Active Soundwave */}
             <Soundwave
-              isActive={Boolean(activeSpeaker)}
-              color={isUserSpeaking ? 'bg-emerald-400' : 'bg-indigo-400'}
+              isActive={Boolean(activeSpeaker) || isWaitingForUser}
+              color={isWaitingForUser || isUserSpeaking ? 'bg-emerald-400' : 'bg-indigo-400'}
               size="lg"
             />
           </div>
 
           {/* Participant Avatars in Circular / Grid Layout */}
           <div className="relative z-10 w-full max-w-3xl">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 justify-items-center">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-4 sm:gap-6 justify-items-center">
               {allDiscussants.map((participant) => {
                 const isActive = activeSpeaker === participant.name || (participant.isUser && isUserSpeaking);
                 const isUser = participant.isUser;
                 const isPreparing = !isUser && preparingSpeaker === participant.name && status === 'ai_thinking';
+                const isUserWaitingTurn = isUser && isWaitingForUser;
 
                 return (
                   <div
                     key={participant.id}
-                    className={`relative flex flex-col items-center p-3.5 sm:p-4 rounded-2xl transition-all duration-300 w-full max-w-[185px] ${
-                      isActive
+                    className={`relative flex flex-col items-center p-3.5 sm:p-4 rounded-2xl transition-all duration-300 w-full max-w-[195px] ${
+                      isUserWaitingTurn
+                        ? 'bg-slate-800/95 border-2 border-emerald-400 shadow-2xl shadow-emerald-500/30 scale-105'
+                        : isActive
                         ? 'bg-slate-800/90 shadow-2xl scale-105 border-2 border-indigo-400/80 shadow-indigo-500/20'
                         : isPreparing
                         ? 'bg-slate-800/70 border-2 border-amber-500/60 shadow-lg shadow-amber-500/15 scale-[1.02]'
-                        : isUser && !userIsMuted
-                        ? 'bg-slate-900/80 border border-emerald-500/40 shadow-lg shadow-emerald-500/10'
                         : 'bg-slate-900/60 border border-slate-800/80 hover:border-slate-700'
                     }`}
                   >
                     {/* Glowing active ring for speaking */}
-                    {isActive && (
+                    {(isActive || isUserWaitingTurn) && (
                       <span
                         className="absolute -inset-1 rounded-2xl opacity-60 blur-sm pointer-events-none"
-                        style={{ backgroundColor: participant.glowColor }}
+                        style={{ backgroundColor: isUserWaitingTurn ? '#10B981' : participant.glowColor }}
                       />
                     )}
 
@@ -263,21 +305,25 @@ export const Arena: React.FC<ArenaProps> = ({
                       </div>
                     )}
 
+                    {/* User's Turn Callout Badge */}
+                    {isUserWaitingTurn && (
+                      <div className="absolute -top-3 px-2.5 py-0.5 bg-emerald-500 text-slate-950 font-black rounded-full text-[10px] flex items-center gap-1 shadow-lg shadow-emerald-500/40 animate-bounce z-20">
+                        <span>👉 YOUR TURN TO SPEAK</span>
+                      </div>
+                    )}
+
                     {/* Avatar Container */}
                     <div className="relative mb-2.5">
                       <div
                         className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center text-2xl sm:text-3xl shadow-inner border transition-all ${
-                          isActive
+                          isUserWaitingTurn
+                            ? 'ring-4 ring-offset-2 ring-offset-slate-950 ring-emerald-400 border-transparent bg-slate-800'
+                            : isActive
                             ? 'ring-4 ring-offset-2 ring-offset-slate-950 ring-indigo-400 border-transparent bg-slate-800'
-                            : isUser && !userIsMuted
-                            ? 'ring-2 ring-offset-2 ring-offset-slate-950 ring-emerald-500/70 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-emerald-500/50 bg-slate-800'
                             : isPreparing
                             ? 'ring-2 ring-offset-2 ring-offset-slate-950 ring-amber-400/80 border-amber-500/60 bg-slate-800'
                             : 'border-slate-700/60 bg-slate-800/80'
                         }`}
-                        style={{
-                          borderColor: isActive ? participant.glowColor : undefined,
-                        }}
                       >
                         {participant.avatar}
                       </div>
@@ -295,47 +341,45 @@ export const Arena: React.FC<ArenaProps> = ({
                           <MicOff className="w-3 h-3" />
                         </div>
                       )}
-
-                      {/* User Live Mic Wave badge */}
-                      {isUser && !userIsMuted && !isActive && (
-                        <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-emerald-500 text-white shadow-md animate-pulse" title="Microphone is listening">
-                          <Mic className="w-3 h-3" />
-                        </div>
-                      )}
                     </div>
 
                     {/* Participant Details */}
                     <div className="text-center w-full min-w-0">
-                      <div className="flex items-center justify-center gap-1">
-                        <span className="text-xs sm:text-sm font-bold text-white truncate">
-                          {participant.name}
-                        </span>
-                      </div>
+                      <span className="text-xs sm:text-sm font-bold text-white truncate block">
+                        {participant.name}
+                      </span>
                       <span className="text-[10px] text-slate-400 block truncate mt-0.5">
                         {participant.role.split('&')[0]}
                       </span>
                     </div>
 
-                    {/* User Interruption Helper Badge */}
-                    {isUser && (
-                      <div className="mt-1">
-                        {!userIsMuted ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-[9px] font-semibold text-emerald-400 animate-pulse">
+                    {/* Role / Turn Status Badges */}
+                    <div className="mt-1">
+                      {isUser ? (
+                        isUserWaitingTurn ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400 text-[10px] font-bold text-emerald-300 animate-pulse">
                             <Sparkles className="w-2.5 h-2.5" />
-                            <span>Interrupt anytime</span>
+                            <span>Speaking Floor Active</span>
+                          </span>
+                        ) : !userIsMuted ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-[9px] font-semibold text-emerald-400">
+                            <span>Mic Ready</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-[9px] font-medium text-rose-400">
                             <span>Muted</span>
                           </span>
-                        )}
-                      </div>
-                    )}
+                        )
+                      ) : (
+                        <span className="text-[9px] text-slate-500 font-mono">
+                          {participant.id === ai1?.id ? 'Loop Pos: #1' : 'Loop Pos: #2'}
+                        </span>
+                      )}
+                    </div>
 
-                    {/* Micro Equalizer under avatar when active */}
                     <div className="mt-1.5 h-3 flex items-center">
                       <Soundwave
-                        isActive={isActive || (isUser && !userIsMuted && !activeSpeaker)}
+                        isActive={isActive || isUserWaitingTurn}
                         color={isUser ? 'bg-emerald-400' : isPreparing ? 'bg-amber-400' : 'bg-indigo-400'}
                         size="sm"
                       />
@@ -348,7 +392,6 @@ export const Arena: React.FC<ArenaProps> = ({
 
           {/* In-Arena Floor Controls */}
           <div className="relative z-10 mt-6 sm:mt-8 flex flex-wrap items-center justify-center gap-3">
-            {/* User Microphone Toggle */}
             <button
               onClick={toggleMute}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-lg ${
@@ -356,95 +399,55 @@ export const Arena: React.FC<ArenaProps> = ({
                   ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 hover:bg-rose-600/30'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 ring-2 ring-emerald-400/50'
               }`}
-              title={userIsMuted ? 'Unmute Microphone' : 'Microphone is active - interrupt anytime!'}
+              title={userIsMuted ? 'Unmute Microphone' : 'Mute Microphone'}
             >
               {userIsMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              <span>{userIsMuted ? 'Mic Muted' : 'Mic Active (Can Interrupt)'}</span>
+              <span>{userIsMuted ? 'Mic Muted' : 'Mic Active'}</span>
             </button>
 
-            {/* Force AI to Speak Button (Edge case solver) */}
             <button
               onClick={forceAIToSpeak}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs sm:text-sm font-medium text-slate-200 transition-all shadow-sm"
-              title="Click if pause detection was missed or to pass the floor to an AI peer"
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs sm:text-sm font-medium text-slate-200"
+              title="Pass your turn to the next AI in loop"
             >
               <RotateCw className="w-4 h-4 text-indigo-400" />
-              <span>Force AI to Speak</span>
-            </button>
-
-            {/* Raise Hand Toggle */}
-            <button
-              onClick={handleRaiseHand}
-              className={`flex items-center gap-2 px-4 py-2.5 border rounded-xl text-xs sm:text-sm font-medium transition-all shadow-sm ${
-                hasRaisedHand
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
-              }`}
-              title="Signal intent to speak or claim floor"
-            >
-              <Hand className="w-4 h-4 text-amber-400" />
-              <span>{hasRaisedHand ? 'Hand Raised' : 'Raise Hand'}</span>
+              <span>{isWaitingForUser ? 'Pass Turn to AI 1' : 'Force AI to Speak'}</span>
             </button>
           </div>
         </div>
 
         {/* Right / Bottom: Live Scrolling Transcript Drawer */}
         <div className="w-full lg:w-96 xl:w-[440px] flex flex-col bg-slate-900/95 border-t lg:border-t-0 lg:border-l border-slate-800 shrink-0">
-          {/* Transcript Panel Header */}
           <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
                 Live Transcript
               </h3>
-              <span className="px-2 py-0.5 text-[10px] bg-slate-800 text-slate-400 rounded-full font-mono">
-                {transcript.length} turns
-              </span>
             </div>
-
-            <button
-              onClick={() => setAutoScroll(prev => !prev)}
-              className={`text-[11px] font-medium px-2 py-1 rounded transition-colors ${
-                autoScroll ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
-            </button>
+            <span className="text-[11px] text-slate-400 font-mono">{transcript.length} turns</span>
           </div>
 
-          {/* Transcript Scroll Area */}
           <div className="flex-1 p-4 overflow-y-auto space-y-3.5 text-xs sm:text-sm">
-            {transcript.map((msg) => {
-              const isUser = msg.isUser;
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col space-y-1 p-3 rounded-xl transition-all ${
-                    isUser
-                      ? 'bg-emerald-950/30 border border-emerald-500/30 ml-3'
-                      : 'bg-slate-950/60 border border-slate-800/80 mr-3'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span
-                      className={`font-bold ${
-                        isUser ? 'text-emerald-400' : 'text-indigo-300'
-                      }`}
-                    >
-                      {msg.speaker}
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      {msg.timestamp}
-                    </span>
-                  </div>
-                  <p className="text-slate-200 leading-relaxed font-sans select-text">
-                    "{msg.text}"
-                  </p>
+            {transcript.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex flex-col space-y-1 p-3 rounded-xl ${
+                  msg.isUser
+                    ? 'bg-emerald-950/30 border border-emerald-500/30 ml-3'
+                    : 'bg-slate-950/60 border border-slate-800/80 mr-3'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className={`font-bold ${msg.isUser ? 'text-emerald-400' : 'text-indigo-300'}`}>
+                    {msg.speaker}
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">{msg.timestamp}</span>
                 </div>
-              );
-            })}
+                <p className="text-slate-200 leading-relaxed font-sans select-text">"{msg.text}"</p>
+              </div>
+            ))}
 
-            {/* Interim Transcript (Real-time what the user is saying right now) */}
             {interimTranscript && (
               <div className="p-3 bg-emerald-950/40 border border-emerald-400/50 rounded-xl ml-3 animate-pulse">
                 <div className="flex items-center justify-between text-[11px] text-emerald-400 mb-1">
@@ -462,23 +465,43 @@ export const Arena: React.FC<ArenaProps> = ({
             <div ref={transcriptBottomRef} />
           </div>
 
+          {/* User Turn Prompt Callout */}
+          {isWaitingForUser && (
+            <div className="px-3 py-1.5 bg-emerald-950/80 border-t border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center justify-between animate-pulse">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                Your Turn! Speak into mic or type your point below:
+              </span>
+              <button
+                type="button"
+                onClick={forceAIToSpeak}
+                className="text-[10px] bg-emerald-800/70 hover:bg-emerald-700 text-emerald-200 px-2.5 py-0.5 rounded border border-emerald-500/50 transition-colors"
+                title="Pass floor back to AI 1"
+              >
+                Pass Turn ➔
+              </button>
+            </div>
+          )}
+
           {/* Manual Text Fallback Input Bar */}
           <form
             onSubmit={handleManualTextSubmit}
-            className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2"
+            className={`p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2 ${
+              isWaitingForUser ? 'ring-2 ring-emerald-500/40' : ''
+            }`}
           >
             <input
               type="text"
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Type your point if mic is muted..."
+              placeholder={isWaitingForUser ? "Type your point to continue loop..." : "Type your point..."}
               className="flex-1 px-3.5 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
             />
             <button
               type="submit"
               disabled={!textInput.trim()}
               className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-40 transition-colors"
-              title="Submit argument"
+              title="Submit point and resume loop"
             >
               <Send className="w-4 h-4" />
             </button>
