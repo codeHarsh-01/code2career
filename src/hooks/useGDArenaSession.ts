@@ -12,11 +12,13 @@ import { getNextSpeakerTurn, generateFeedbackReport } from '../services/llm';
 interface UseGDArenaSessionProps {
   config: SessionConfig;
   onSessionComplete: (report: FeedbackReportData, transcript: Message[]) => void;
+  onFinalUserSpeech?: (finalText: string) => void;
 }
 
 export function useGDArenaSession({
   config,
   onSessionComplete,
+  onFinalUserSpeech,
 }: UseGDArenaSessionProps) {
   const [transcript, setTranscript] = useState<Message[]>([]);
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
@@ -44,10 +46,15 @@ export function useGDArenaSession({
   transcriptRef.current = transcript;
 
   const isAITurnInProgressRef = useRef<boolean>(false);
+  const onFinalUserSpeechRef = useRef(onFinalUserSpeech);
+  onFinalUserSpeechRef.current = onFinalUserSpeech;
 
   const { speak, cancel: cancelSpeech, isSpeaking: isAISpeaking } = useSpeechSynthesis({
     language: config.language,
   });
+
+  // Reset speech state placeholder
+  const resetSpeechStateRef = useRef<() => void>(() => {});
 
   // 3. User Submission Handler (Unlocking the loop)
   const handleUserSubmission = useCallback((text: string) => {
@@ -67,6 +74,9 @@ export function useGDArenaSession({
     setIsWaitingForUser(false);
     setActiveSpeaker(null);
     setPreparingSpeaker(null);
+
+    // Reset speech state
+    resetSpeechStateRef.current();
 
     // Reset currentTurnIndex back to 0 (AI 1's turn)
     setCurrentTurnIndex(0);
@@ -90,18 +100,29 @@ export function useGDArenaSession({
   const {
     isSupported: isSpeechSupported,
     isListening,
+    liveInterimText,
     interimTranscript,
     error: speechError,
     permissionDenied,
     startListening,
     stopListening,
     flushCurrentSpeech,
+    resetSpeechState,
   } = useSpeechRecognition({
     onSpeechComplete: handleUserSpeechComplete,
     onSpeechStart: handleUserSpeechStart,
-    pauseThresholdMs: 1700,
+    onFinalText: (finalChunk) => {
+      if (onFinalUserSpeechRef.current) {
+        onFinalUserSpeechRef.current(finalChunk);
+      }
+    },
+    pauseThresholdMs: 1800,
     lang: config.language === 'Hindi' ? 'hi-IN' : 'en-IN',
+    isWaitingForUser,
+    userIsMuted,
   });
+
+  resetSpeechStateRef.current = resetSpeechState;
 
   // 2. Dynamic Conversation Loop via React useEffect:
   // As long as currentTurnIndex < turnSequence.length - 1 (AI's turn):
@@ -339,6 +360,7 @@ export function useGDArenaSession({
     isGeneratingFeedback,
     isSpeechSupported,
     isListening,
+    liveInterimText,
     interimTranscript,
     speechError,
     permissionDenied,

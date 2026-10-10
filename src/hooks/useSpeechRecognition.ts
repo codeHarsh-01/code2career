@@ -39,19 +39,25 @@ declare global {
 interface UseSpeechRecognitionOptions {
   onSpeechComplete?: (finalText: string) => void;
   onSpeechStart?: () => void;
+  onFinalText?: (finalChunk: string) => void;
   pauseThresholdMs?: number; // silence delay before committing turn (default: 1800ms)
   lang?: string;
+  isWaitingForUser?: boolean;
+  userIsMuted?: boolean;
 }
 
 export function useSpeechRecognition({
   onSpeechComplete,
   onSpeechStart,
+  onFinalText,
   pauseThresholdMs = 1800,
   lang = 'en-US',
+  isWaitingForUser = false,
+  userIsMuted = false,
 }: UseSpeechRecognitionOptions = {}) {
   const [isSupported, setIsSupported] = useState<boolean>(true);
   const [isListening, setIsListening] = useState<boolean>(false);
-  const [interimTranscript, setInterimTranscript] = useState<string>('');
+  const [liveInterimText, setLiveInterimText] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
 
@@ -61,9 +67,15 @@ export function useSpeechRecognition({
   const shouldBeListeningRef = useRef<boolean>(false);
   const onSpeechCompleteRef = useRef(onSpeechComplete);
   const onSpeechStartRef = useRef(onSpeechStart);
+  const onFinalTextRef = useRef(onFinalText);
+  const isWaitingForUserRef = useRef<boolean>(isWaitingForUser);
+  const userIsMutedRef = useRef<boolean>(userIsMuted);
 
   onSpeechCompleteRef.current = onSpeechComplete;
   onSpeechStartRef.current = onSpeechStart;
+  onFinalTextRef.current = onFinalText;
+  isWaitingForUserRef.current = isWaitingForUser;
+  userIsMutedRef.current = userIsMuted;
 
   // Update recognition language dynamically when lang changes
   useEffect(() => {
@@ -72,7 +84,7 @@ export function useSpeechRecognition({
     }
   }, [lang]);
 
-  // Initialize SpeechRecognition
+  // Initialize SpeechRecognition with interimResults enabled
   useEffect(() => {
     const SpeechRecognitionAPI =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -86,7 +98,7 @@ export function useSpeechRecognition({
     setIsSupported(true);
     const recognition = new SpeechRecognitionAPI();
     recognition.continuous = true;
-    recognition.interimResults = true;
+    recognition.interimResults = true; // 1. Enable Interim Results for real-time live typing
     recognition.lang = lang;
     recognition.maxAlternatives = 1;
 
@@ -95,26 +107,41 @@ export function useSpeechRecognition({
       setError(null);
     };
 
+    // 2. Separate States for Live and Final Text
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let currentInterim = '';
-      let hasNewSpeech = false;
+      let finalChunk = '';
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const item = event.results[i];
         const transcriptChunk = item[0].transcript;
 
         if (item.isFinal) {
-          accumulatedTextRef.current += ' ' + transcriptChunk.trim();
-          hasNewSpeech = true;
+          finalChunk += transcriptChunk;
         } else {
           currentInterim += transcriptChunk;
-          hasNewSpeech = true;
         }
       }
 
-      setInterimTranscript(currentInterim);
+      // If result.isFinal is false, update liveInterimText state so we can show live typing
+      if (currentInterim) {
+        setLiveInterimText(currentInterim);
+      }
 
-      if (hasNewSpeech) {
+      // If result.isFinal is true, take finalized text, append to actual input/transcript,
+      // and immediately clear the liveInterimText state
+      if (finalChunk) {
+        const trimmed = finalChunk.trim();
+        if (trimmed) {
+          accumulatedTextRef.current = (accumulatedTextRef.current + ' ' + trimmed).trim();
+          setLiveInterimText(''); // Immediately clear live interim text
+          if (onFinalTextRef.current) {
+            onFinalTextRef.current(trimmed);
+          }
+        }
+      }
+
+      if (currentInterim || finalChunk) {
         // Notify parent that user is actively speaking (for interruption handling)
         if (onSpeechStartRef.current) {
           onSpeechStartRef.current();
@@ -132,7 +159,7 @@ export function useSpeechRecognition({
               onSpeechCompleteRef.current(fullSpoken);
             }
             accumulatedTextRef.current = '';
-            setInterimTranscript('');
+            setLiveInterimText('');
           }
         }, pauseThresholdMs);
       }
@@ -150,13 +177,30 @@ export function useSpeechRecognition({
       }
     };
 
+    // 4. Robust Restart Logic (Auto-Wake):
+    // The Web Speech API drops frequently. In the onend event handler, check if it is still
+    // the user's turn (isWaitingForUser === true). If it is, and the mic randomly disconnected
+    // without the user submitting, automatically restart recognition (recognition.start())
+    // so the mic doesn't silently die in the middle of their turn.
     recognition.onend = () => {
-      // Chrome often stops recognition after a pause; restart if user still wants to listen
-      if (shouldBeListeningRef.current) {
+      const shouldAutoRestart =
+        !userIsMutedRef.current &&
+        (isWaitingForUserRef.current || shouldBeListeningRef.current);
+
+      if (shouldAutoRestart) {
         try {
           recognition.start();
         } catch {
-          // Ignore if already active
+          // If browser is finishing audio release, auto-retry with debounce
+          setTimeout(() => {
+            try {
+              if (!userIsMutedRef.current && (isWaitingForUserRef.current || shouldBeListeningRef.current)) {
+                recognition.start();
+              }
+            } catch {
+              // Ignore if already active
+            }
+          }, 150);
         }
       } else {
         setIsListening(false);
@@ -181,8 +225,6 @@ export function useSpeechRecognition({
     shouldBeListeningRef.current = true;
     setError(null);
     setPermissionDenied(false);
-    accumulatedTextRef.current = '';
-    setInterimTranscript('');
 
     try {
       recognitionRef.current.start();
@@ -206,25 +248,32 @@ export function useSpeechRecognition({
     setIsListening(false);
   }, []);
 
+  const resetSpeechState = useCallback(() => {
+    accumulatedTextRef.current = '';
+    setLiveInterimText('');
+  }, []);
+
   // Flush any pending text immediately (e.g. when user clicks Force Next or manually submits)
   const flushCurrentSpeech = useCallback((): string => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
     }
-    const fullSpoken = (accumulatedTextRef.current + ' ' + interimTranscript).trim();
+    const fullSpoken = (accumulatedTextRef.current + ' ' + liveInterimText).trim();
     accumulatedTextRef.current = '';
-    setInterimTranscript('');
+    setLiveInterimText('');
     return fullSpoken;
-  }, [interimTranscript]);
+  }, [liveInterimText]);
 
   return {
     isSupported,
     isListening,
-    interimTranscript,
+    liveInterimText,
+    interimTranscript: liveInterimText, // Backward compatibility alias
     error,
     permissionDenied,
     startListening,
     stopListening,
     flushCurrentSpeech,
+    resetSpeechState,
   };
 }

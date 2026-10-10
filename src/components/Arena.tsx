@@ -39,6 +39,7 @@ export const Arena: React.FC<ArenaProps> = ({
     timeRemaining,
     userIsMuted,
     isGeneratingFeedback,
+    liveInterimText,
     interimTranscript,
     permissionDenied,
     currentTurnIndex,
@@ -52,6 +53,9 @@ export const Arena: React.FC<ArenaProps> = ({
   } = useGDArenaSession({
     config,
     onSessionComplete,
+    onFinalUserSpeech: (finalChunk) => {
+      setTextInput(prev => (prev ? `${prev} ${finalChunk}`.trim() : finalChunk.trim()));
+    },
   });
 
   // Start the session on mount
@@ -64,7 +68,14 @@ export const Arena: React.FC<ArenaProps> = ({
     if (autoScroll && transcriptBottomRef.current) {
       transcriptBottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [transcript, interimTranscript, autoScroll]);
+  }, [transcript, liveInterimText, interimTranscript, autoScroll]);
+
+  // Clear manual text input when user's turn finishes
+  useEffect(() => {
+    if (!isWaitingForUser) {
+      setTextInput('');
+    }
+  }, [isWaitingForUser]);
 
   // Format countdown mm:ss
   const formatTime = (secs: number) => {
@@ -81,7 +92,7 @@ export const Arena: React.FC<ArenaProps> = ({
       ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
       : 'text-indigo-400 border-indigo-500/40 bg-indigo-500/10';
 
-  const isUserSpeaking = activeSpeaker === config.userName || Boolean(interimTranscript);
+  const isUserSpeaking = activeSpeaker === config.userName || Boolean(liveInterimText || interimTranscript);
 
   const userParticipant: Participant = {
     id: 'user',
@@ -101,8 +112,9 @@ export const Arena: React.FC<ArenaProps> = ({
 
   const handleManualTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!textInput.trim()) return;
-    submitTextTurn(textInput);
+    const submissionText = (textInput + (liveInterimText ? ' ' + liveInterimText : '')).trim();
+    if (!submissionText) return;
+    submitTextTurn(submissionText);
     setTextInput('');
   };
 
@@ -453,16 +465,16 @@ export const Arena: React.FC<ArenaProps> = ({
               </div>
             ))}
 
-            {interimTranscript && (
+            {(liveInterimText || interimTranscript) && (
               <div className="p-3 bg-emerald-950/40 border border-emerald-400/50 rounded-xl ml-3 animate-pulse">
                 <div className="flex items-center justify-between text-[11px] text-emerald-400 mb-1">
                   <span className="font-bold flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    {config.userName} (Speaking now...)
+                    {config.userName} (Speaking live...)
                   </span>
                 </div>
                 <p className="text-emerald-200 italic leading-relaxed">
-                  "{interimTranscript}..."
+                  "{liveInterimText || interimTranscript}..."
                 </p>
               </div>
             )}
@@ -470,17 +482,24 @@ export const Arena: React.FC<ArenaProps> = ({
             <div ref={transcriptBottomRef} />
           </div>
 
-          {/* User Turn Prompt Callout */}
+          {/* User Turn Prompt Callout with Live Sync */}
           {isWaitingForUser && (
             <div className="px-3 py-1.5 bg-emerald-950/80 border-t border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center justify-between animate-pulse">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                Your Turn! Speak into mic or type your point below:
+              <span className="flex items-center gap-1.5 truncate mr-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                {liveInterimText ? (
+                  <span className="truncate">
+                    <span className="text-emerald-400 font-bold">Listening:</span>{' '}
+                    <span className="italic text-slate-300">"{liveInterimText}"</span>
+                  </span>
+                ) : (
+                  <span>Your Turn! Speak into mic or type your point below:</span>
+                )}
               </span>
               <button
                 type="button"
                 onClick={forceAIToSpeak}
-                className="text-[10px] bg-emerald-800/70 hover:bg-emerald-700 text-emerald-200 px-2.5 py-0.5 rounded border border-emerald-500/50 transition-colors"
+                className="text-[10px] bg-emerald-800/70 hover:bg-emerald-700 text-emerald-200 px-2.5 py-0.5 rounded border border-emerald-500/50 transition-colors shrink-0"
                 title="Pass floor back to AI 1"
               >
                 Pass Turn ➔
@@ -488,24 +507,56 @@ export const Arena: React.FC<ArenaProps> = ({
             </div>
           )}
 
-          {/* Manual Text Fallback Input Bar */}
+          {/* Manual Text Fallback Input Bar with Live Speech Sync */}
           <form
             onSubmit={handleManualTextSubmit}
             className={`p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2 ${
               isWaitingForUser ? 'ring-2 ring-emerald-500/40' : ''
             }`}
           >
-            <input
-              type="text"
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              placeholder={isWaitingForUser ? "Type your point to continue loop..." : "Type your point..."}
-              className="flex-1 px-3.5 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-            />
+            <div className="relative flex-1 flex items-center">
+              <input
+                type="text"
+                value={
+                  liveInterimText && !textInput
+                    ? liveInterimText
+                    : textInput
+                }
+                onChange={(e) => setTextInput(e.target.value)}
+                placeholder={
+                  !userIsMuted && isWaitingForUser
+                    ? "🎙️ Mic listening... speak or type your point..."
+                    : isWaitingForUser
+                    ? "Type your point to continue loop..."
+                    : "Type your point..."
+                }
+                className={`w-full px-3.5 py-2 bg-slate-900 border rounded-xl text-xs sm:text-sm focus:outline-none transition-all pr-24 ${
+                  liveInterimText && !textInput
+                    ? 'text-slate-400 italic border-emerald-500/60 ring-1 ring-emerald-500/40 bg-slate-900/90'
+                    : 'text-white border-slate-700/80 focus:border-indigo-500'
+                }`}
+              />
+
+              {/* Ghost preview when textInput already has characters and user is continuing to speak */}
+              {liveInterimText && textInput && (
+                <span className="absolute right-24 pointer-events-none text-xs text-slate-400 italic truncate max-w-[45%]">
+                  ...{liveInterimText}
+                </span>
+              )}
+
+              {/* Real-time typing sync badge */}
+              {liveInterimText && (
+                <div className="absolute right-2.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-950/90 border border-emerald-500/40 text-[10px] text-emerald-300 font-mono pointer-events-none animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  <span>Live typing...</span>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
-              disabled={!textInput.trim()}
-              className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+              disabled={!textInput.trim() && !liveInterimText.trim()}
+              className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-40 transition-colors shrink-0"
               title="Submit point and resume loop"
             >
               <Send className="w-4 h-4" />
