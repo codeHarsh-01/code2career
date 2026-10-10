@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type {
   Message,
   SessionConfig,
@@ -8,8 +8,6 @@ import type {
 import { useSpeechRecognition } from './useSpeechRecognition';
 import { useSpeechSynthesis } from './useSpeechSynthesis';
 import { getNextSpeakerTurn, generateFeedbackReport } from '../services/llm';
-
-export const TURN_SEQUENCE: Array<'AI_1' | 'AI_2' | 'USER'> = ['AI_1', 'AI_2', 'USER'];
 
 interface UseGDArenaSessionProps {
   config: SessionConfig;
@@ -30,8 +28,15 @@ export function useGDArenaSession({
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState<boolean>(false);
   const [interruptionsHandled, setInterruptionsHandled] = useState<number>(0);
 
-  // 1. Strict Turn-Based State Management:
-  // Loop: AI 1 (index 0) -> AI 2 (index 1) -> User (index 2)
+  // 1. Dynamic Turn Sequence:
+  // Dynamically generated based on aiParticipants list (config.selectedPersonalities).
+  // For example: 3 AIs -> ['AI_1', 'AI_2', 'AI_3', 'USER']
+  // 'USER' is always appended as the very last turn in the round.
+  const turnSequence: string[] = useMemo(() => {
+    const aiTurns = config.selectedPersonalities.map((_, index) => `AI_${index + 1}`);
+    return [...aiTurns, 'USER'];
+  }, [config.selectedPersonalities]);
+
   const [currentTurnIndex, setCurrentTurnIndex] = useState<number>(0);
   const [isWaitingForUser, setIsWaitingForUser] = useState<boolean>(false);
 
@@ -93,15 +98,23 @@ export function useGDArenaSession({
     pauseThresholdMs: 1700,
   });
 
-  // 2. The Strict Conversation Loop via React useEffect:
-  // AI 1 -> AI 2 -> User -> AI 1 -> AI 2 -> User ...
+  // 2. Dynamic Conversation Loop via React useEffect:
+  // As long as currentTurnIndex < turnSequence.length - 1 (AI's turn):
+  // trigger LLM/TTS for that specific AI, then increment the index.
+  // When currentTurnIndex === turnSequence.length - 1 (User's turn):
+  // set isWaitingForUser to true and strictly halt all LLM API calls and TTS.
   useEffect(() => {
     if (!isTimerRunning) return;
 
-    const currentTurn = TURN_SEQUENCE[currentTurnIndex];
+    if (currentTurnIndex >= turnSequence.length) {
+      setCurrentTurnIndex(0);
+      return;
+    }
 
-    // CASE 1: When it is the User's turn (index 2)
-    if (currentTurn === 'USER') {
+    const isUserTurn = currentTurnIndex === turnSequence.length - 1;
+
+    // CASE 1: When it is the User's turn (currentTurnIndex === turnSequence.length - 1)
+    if (isUserTurn) {
       setIsWaitingForUser(true);
       setStatus('listening');
       setActiveSpeaker(null);
@@ -112,16 +125,15 @@ export function useGDArenaSession({
       if (!userIsMuted) {
         startListening();
       }
-      return; // Strictly halt all LLM API calls. The system pauses completely.
+      return; // Strictly halt all LLM API calls and TTS. The system must wait.
     }
 
-    // CASE 2: When it is an AI's turn (index 0 for AI_1, index 1 for AI_2)
+    // CASE 2: When it is an AI's turn (currentTurnIndex < turnSequence.length - 1)
     setIsWaitingForUser(false);
 
-    // Map AI_1 to first selected persona, AI_2 to second selected persona
-    const ai1 = config.selectedPersonalities[0];
-    const ai2 = config.selectedPersonalities[1] || config.selectedPersonalities[0];
-    const currentAI = currentTurn === 'AI_1' ? ai1 : ai2;
+    // Get the specific AI participant for this turn
+    const currentAI = config.selectedPersonalities[currentTurnIndex];
+    if (!currentAI) return;
 
     let isEffectActive = true;
     isAITurnInProgressRef.current = true;
@@ -152,13 +164,13 @@ export function useGDArenaSession({
           personalityId: currentAI.id,
         };
 
-        // Append to transcript
+        // Append it to the transcript
         setTranscript(prev => [...prev, aiMessage]);
         setStatus('ai_speaking');
         setActiveSpeaker(currentAI.name);
         setPreparingSpeaker(null);
 
-        // Speak using TTS
+        // Speak it using TTS
         speak(
           response.dialogue,
           currentAI,
@@ -176,8 +188,8 @@ export function useGDArenaSession({
               setStatus('idle');
               isAITurnInProgressRef.current = false;
 
-              // Automatically advance to the next turn in sequence (0 -> 1 -> 2)
-              setCurrentTurnIndex(prev => (prev + 1) % TURN_SEQUENCE.length);
+              // Automatically increment index to advance to the next turn (AI or User)
+              setCurrentTurnIndex(prev => prev + 1);
             }
           }
         );
@@ -189,7 +201,7 @@ export function useGDArenaSession({
           setPreparingSpeaker(null);
           isAITurnInProgressRef.current = false;
           // Advance on error to prevent deadlock
-          setCurrentTurnIndex(prev => (prev + 1) % TURN_SEQUENCE.length);
+          setCurrentTurnIndex(prev => prev + 1);
         }
       }
     };
@@ -201,6 +213,7 @@ export function useGDArenaSession({
     };
   }, [
     currentTurnIndex,
+    turnSequence,
     isTimerRunning,
     config.topic,
     config.selectedPersonalities,
@@ -323,7 +336,7 @@ export function useGDArenaSession({
     interruptionsHandled,
     currentTurnIndex,
     isWaitingForUser,
-    turnSequence: TURN_SEQUENCE,
+    turnSequence,
     startSession,
     toggleMute,
     forceAIToSpeak,

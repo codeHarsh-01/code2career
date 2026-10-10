@@ -43,6 +43,7 @@ export const Arena: React.FC<ArenaProps> = ({
     permissionDenied,
     currentTurnIndex,
     isWaitingForUser,
+    turnSequence,
     startSession,
     toggleMute,
     forceAIToSpeak,
@@ -81,10 +82,6 @@ export const Arena: React.FC<ArenaProps> = ({
       : 'text-indigo-400 border-indigo-500/40 bg-indigo-500/10';
 
   const isUserSpeaking = activeSpeaker === config.userName || Boolean(interimTranscript);
-
-  // Identify participants in order: AI_1, AI_2, User
-  const ai1 = config.selectedPersonalities[0];
-  const ai2 = config.selectedPersonalities[1] || config.selectedPersonalities[0];
 
   const userParticipant: Participant = {
     id: 'user',
@@ -155,52 +152,47 @@ export const Arena: React.FC<ArenaProps> = ({
         </div>
       </div>
 
-      {/* Strict Turn Stepper Indicator Bar */}
-      <div className="px-4 py-2 bg-slate-900/95 border-b border-slate-800/80 flex items-center justify-center gap-2 sm:gap-4 overflow-x-auto text-[11px] font-semibold shrink-0">
-        <span className="text-slate-400 text-[10px] uppercase tracking-wider hidden sm:inline">
-          Turn Sequence:
+      {/* Dynamic Turn Stepper Indicator Bar */}
+      <div className="px-4 py-2 bg-slate-900/95 border-b border-slate-800/80 flex items-center justify-center gap-1.5 sm:gap-3 overflow-x-auto text-[11px] font-semibold shrink-0">
+        <span className="text-slate-400 text-[10px] uppercase tracking-wider hidden md:inline">
+          Round Sequence:
         </span>
 
-        {/* Step 0: AI 1 */}
-        <div
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all ${
-            currentTurnIndex === 0
-              ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300 ring-2 ring-indigo-500/50 scale-105 shadow-md shadow-indigo-500/20 font-bold'
-              : 'bg-slate-950 border-slate-800 text-slate-500'
-          }`}
-        >
-          <span>1. {ai1?.name || 'AI 1'}</span>
-          {currentTurnIndex === 0 && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />}
-        </div>
+        {turnSequence.map((turn, idx) => {
+          const isUserStep = idx === turnSequence.length - 1;
+          const isCurrent = currentTurnIndex === idx;
+          const participant = isUserStep ? userParticipant : config.selectedPersonalities[idx];
+          const displayName = isUserStep ? 'Candidate (You)' : participant?.name || turn;
 
-        <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
-
-        {/* Step 1: AI 2 */}
-        <div
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all ${
-            currentTurnIndex === 1
-              ? 'bg-purple-600/30 border-purple-500 text-purple-300 ring-2 ring-purple-500/50 scale-105 shadow-md shadow-purple-500/20 font-bold'
-              : 'bg-slate-950 border-slate-800 text-slate-500'
-          }`}
-        >
-          <span>2. {ai2?.name || 'AI 2'}</span>
-          {currentTurnIndex === 1 && <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping" />}
-        </div>
-
-        <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
-
-        {/* Step 2: User */}
-        <div
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all ${
-            currentTurnIndex === 2
-              ? 'bg-emerald-600/30 border-emerald-400 text-emerald-300 ring-2 ring-emerald-400 scale-105 shadow-lg shadow-emerald-500/30 font-bold animate-pulse'
-              : 'bg-slate-950 border-slate-800 text-slate-500'
-          }`}
-        >
-          <UserCheck className="w-3.5 h-3.5" />
-          <span>3. Candidate (You)</span>
-          {currentTurnIndex === 2 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />}
-        </div>
+          return (
+            <React.Fragment key={`${turn}-${idx}`}>
+              <div
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border transition-all ${
+                  isCurrent
+                    ? isUserStep
+                      ? 'bg-emerald-600/30 border-emerald-400 text-emerald-300 ring-2 ring-emerald-400 scale-105 shadow-lg shadow-emerald-500/30 font-bold animate-pulse'
+                      : 'bg-indigo-600/30 border-indigo-500 text-indigo-300 ring-2 ring-indigo-500/50 scale-105 shadow-md shadow-indigo-500/20 font-bold'
+                    : 'bg-slate-950 border-slate-800 text-slate-500'
+                }`}
+              >
+                {isUserStep ? <UserCheck className="w-3.5 h-3.5" /> : null}
+                <span className="truncate max-w-[120px] sm:max-w-none">
+                  {idx + 1}. {displayName}
+                </span>
+                {isCurrent && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      isUserStep ? 'bg-emerald-400' : 'bg-indigo-400'
+                    } animate-ping`}
+                  />
+                )}
+              </div>
+              {idx < turnSequence.length - 1 && (
+                <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
 
       {/* Permission Denied Fallback Banner */}
@@ -241,7 +233,7 @@ export const Arena: React.FC<ArenaProps> = ({
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/15 border border-indigo-500/40 shadow-lg text-xs font-semibold text-indigo-300 mb-2">
                 <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
                 <span>
-                  📢 {activeSpeaker} is speaking ({currentTurnIndex === 0 ? 'Turn 1 of 3' : 'Turn 2 of 3'})
+                  📢 {activeSpeaker} is speaking (Turn {currentTurnIndex + 1} of {turnSequence.length})
                 </span>
               </div>
             ) : (
@@ -263,9 +255,9 @@ export const Arena: React.FC<ArenaProps> = ({
             />
           </div>
 
-          {/* Participant Avatars in Circular / Grid Layout */}
-          <div className="relative z-10 w-full max-w-3xl">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-4 sm:gap-6 justify-items-center">
+          {/* Participant Avatars in Dynamic Grid Layout */}
+          <div className="relative z-10 w-full max-w-4xl">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-5 justify-items-center">
               {allDiscussants.map((participant) => {
                 const isActive = activeSpeaker === participant.name || (participant.isUser && isUserSpeaking);
                 const isUser = participant.isUser;
@@ -372,7 +364,7 @@ export const Arena: React.FC<ArenaProps> = ({
                         )
                       ) : (
                         <span className="text-[9px] text-slate-500 font-mono">
-                          {participant.id === ai1?.id ? 'Loop Pos: #1' : 'Loop Pos: #2'}
+                          Loop Pos: #{config.selectedPersonalities.findIndex(p => p.id === participant.id) + 1}
                         </span>
                       )}
                     </div>

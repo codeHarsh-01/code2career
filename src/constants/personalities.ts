@@ -86,4 +86,21 @@ export const AI_PERSONALITIES: Participant[] = [
     promptInstruction: 'You act as The Devil\'s Advocate. Whenever the group leans toward a consensus, you present the counter-intuitive downside or unintended consequence. You poke holes in popular opinions to test the user\'s reasoning.',
     isUser: false,
   },
+  {
+    id: 'strategist',
+    name: 'The Strategist',
+    role: 'Visionary & Scalability Lead',
+    description: 'Connects ideas to business models, feasibility, policy frameworks, and long-term execution.',
+    avatar: '♟️',
+    color: 'from-emerald-500 to-green-600',
+    glowColor: '#10B981',
+    badgeColor: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+    voiceConfig: {
+      pitch: 1.0,
+      rate: 1.05,
+      genderPreference: 'female',
+    },
+    promptInstruction: 'You act as The Strategist. You emphasize practical execution, governance, scalability, and long-term roadmap. Connect high-level ideas to concrete milestones and regulatory feasibility.',
+    isUser: false,
+  },
 ];
