@@ -28,4 +28,11 @@ export const PRESET_TOPICS: GDTopic[] = [
     context: 'Engagement-maximizing recommendation algorithms have been linked to adolescent screen addiction, attention fragmentation, and mental health crises.',
     seedStatement: 'Hello everyone. Today our panel is tackling digital accountability: should social media companies and AI recommender algorithms be legally liable for cognitive and psychological harm in youths?',
   },
+  {
+    id: 'mobile-phones',
+    title: 'Mobile Phone: Advantages and Disadvantages',
+    category: 'Society & Daily Life',
+    context: 'Smartphones have revolutionized communication, digital payments, and access to learning, but have simultaneously triggered screen addiction, reduced attention spans, and social isolation.',
+    seedStatement: 'Good morning everyone. Today we are discussing Mobile Phones: their key advantages and disadvantages in modern daily life. Who would like to start?',
+  },
 ];
