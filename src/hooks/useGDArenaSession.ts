@@ -59,6 +59,8 @@ export function useGDArenaSession({
       isUser: true,
     };
 
+    // Synchronously append to transcriptRef so it's immediately available to the LLM on the next turn
+    transcriptRef.current = [...transcriptRef.current, userMessage];
     setTranscript(prev => [...prev, userMessage]);
     setIsWaitingForUser(false);
     setActiveSpeaker(null);
@@ -164,7 +166,8 @@ export function useGDArenaSession({
           personalityId: currentAI.id,
         };
 
-        // Append it to the transcript
+        // Synchronously append to transcriptRef so subsequent turns always have the latest dialogue
+        transcriptRef.current = [...transcriptRef.current, aiMessage];
         setTranscript(prev => [...prev, aiMessage]);
         setStatus('ai_speaking');
         setActiveSpeaker(currentAI.name);
@@ -242,6 +245,7 @@ export function useGDArenaSession({
   // Session start lifecycle
   const startSession = useCallback(() => {
     setIsTimerRunning(true);
+    transcriptRef.current = [];
     setTranscript([]);
     setCurrentTurnIndex(0); // Starts at AI_1
     setIsWaitingForUser(false);

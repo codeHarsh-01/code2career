@@ -35,39 +35,45 @@ export async function getNextSpeakerTurn(
     return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
   }
 
-  const personalitiesDescription = participants
-    .map(p => `- ${p.name} (${p.role}): ${p.promptInstruction}`)
-    .join('\n');
+  const personaName = targetSpeaker ? targetSpeaker.name : participants[0].name;
+  const personaRole = targetSpeaker ? targetSpeaker.role : 'Discussant';
+  const personaInstruction = targetSpeaker ? targetSpeaker.promptInstruction : '';
 
   const transcriptHistory = transcript.length === 0
-    ? '(No conversation yet. Moderator or another participant should initiate.)'
+    ? '(No conversation yet. Open the discussion with an insightful point or framing on the topic.)'
     : transcript
-        .map(m => `${m.speaker}: "${m.text}"`)
+        .map((m, idx) => `[Turn ${idx + 1}] ${m.speaker}: "${m.text}"`)
         .join('\n');
 
-  const speakerInstruction = targetSpeaker
-    ? `You MUST strictly generate the dialogue for the participant: "${targetSpeaker.name}" (${targetSpeaker.role}).\nParticipant behavior guide: ${targetSpeaker.promptInstruction}`
-    : `Select ONE AI participant who should naturally speak next based on momentum, conflicting views, or to draw in quieter opinions. Do NOT repeat the same speaker if possible (Last speaker: ${lastSpeakerName || 'None'}).`;
+  // 1. Stronger System Prompt (Context Anchoring & Anti-Repetition)
+  const systemPrompt = `You are participating in a Group Discussion. The strict topic is: "${topic}". You must stay absolutely focused on this topic.
 
-  const systemPrompt = `You are simulating a realistic, professional Group Discussion (GD) room.
-Topic: "${topic}"
+You are playing the role of: ${personaName} (${personaRole}). Act according to this persona.
+Persona Guidelines: ${personaInstruction}
 
-The participants in the discussion are:
-${personalitiesDescription}
+CRITICAL: Read the transcript provided. DO NOT repeat what has already been said. Do not just agree with the previous speaker. You must introduce a NEW argument, disagree constructively, or bring a new data point to push the conversation forward. Speak concisely in 2-3 sentences max.
 
-Rules:
-1. ${speakerInstruction}
-2. Generate their exact dialogue in direct reaction to what was just said in the transcript. Address or respectfully challenge the Candidate (User) or other peers directly when appropriate.
-3. Keep responses concise and fast-paced: strictly 1 to 3 sentences (maximum 40 words). Never write long monologues.
-4. Return ONLY a valid JSON object matching this schema:
+OUTPUT REQUIREMENT:
+Return ONLY a valid, parseable JSON object matching this schema:
 {
-  "speaker": "${targetSpeaker ? targetSpeaker.name : 'Name of AI Participant'}",
+  "speaker": "${personaName}",
   "dialogue": "Exact dialogue to be spoken out loud."
 }`;
 
-  const userPrompt = `Here is the current transcript of the group discussion so far:\n\n${transcriptHistory}\n\nDecide who speaks next and output strictly the JSON object.`;
+  const userPrompt = `Strict GD Topic: "${topic}"
+
+Full Transcript of the Group Discussion so far:
+${transcriptHistory}
+
+Instructions for ${personaName}:
+1. Address the latest points in the transcript directly.
+2. Advance the discussion on "${topic}" with a distinct, fresh perspective or constructive challenge.
+3. Keep your statement to 2-3 sentences max (under 45 words).
+4. DO NOT repeat phrases, arguments, or data points already in the transcript.
+5. Output strictly the JSON object.`;
 
   try {
+    // 2. Tweak API Parameters: temperature 0.8, frequency_penalty 0.5, presence_penalty 0.5
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -80,7 +86,9 @@ Rules:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0.7,
+        temperature: 0.8,
+        frequency_penalty: 0.5,
+        presence_penalty: 0.5,
         max_tokens: 150,
         response_format: { type: 'json_object' },
       }),
@@ -89,7 +97,7 @@ Rules:
     if (!response.ok) {
       const errText = await response.text();
       console.warn('Groq API call failed, falling back to simulation:', errText);
-      return simulateNextTurn(topic, participants, transcript, lastSpeakerName);
+      return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
     }
 
     const data = await response.json();
@@ -97,20 +105,19 @@ Rules:
     const parsed = cleanAndParseJson<NextSpeakerResponse>(content);
 
     if (parsed && parsed.speaker && parsed.dialogue) {
-      // Validate that speaker is actually one of the AI participants
       const matched = participants.find(
         p => p.name.toLowerCase() === parsed.speaker.toLowerCase()
       );
       return {
-        speaker: matched ? matched.name : participants[0].name,
+        speaker: matched ? matched.name : personaName,
         dialogue: parsed.dialogue.replace(/^"|"$/g, '').trim(),
       };
     }
 
-    return simulateNextTurn(topic, participants, transcript, lastSpeakerName);
+    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
   } catch (error) {
     console.error('Error fetching next speaker from Groq:', error);
-    return simulateNextTurn(topic, participants, transcript, lastSpeakerName);
+    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
   }
 }
 
@@ -283,7 +290,7 @@ function cleanAndParseJson<T>(raw: string): T | null {
  * Realistic dynamic simulator for demoing and offline hackathon presentation
  */
 function simulateNextTurn(
-  _topic: string,
+  topic: string,
   participants: Participant[],
   transcript: Message[],
   lastSpeakerName?: string,
@@ -298,39 +305,55 @@ function simulateNextTurn(
       : participants[0];
   }
 
-  const lastUserMsg = [...transcript].reverse().find(m => m.isUser);
-  const snippet = lastUserMsg ? lastUserMsg.text.slice(0, 40) + '...' : 'the core problem';
+  const lastMsg = transcript.length > 0 ? transcript[transcript.length - 1] : null;
+  const lastMsgSnippet = lastMsg ? `"${lastMsg.text.slice(0, 35)}..."` : 'the core premise';
 
   const responsesByPersona: Record<string, string[]> = {
     moderator: [
-      `That is an interesting angle on ${snippet}. Let's make sure we examine both short-term impact and long-term sustainability. Does anyone have data to support this?`,
-      `I appreciate that perspective. Let's synthesize this with our earlier points so we can build toward a clear recommendation before time runs out.`,
-      `Well put. Let's also bring in other perspectives—how does this impact the broader ecosystem and not just individual stakeholders?`,
+      `Regarding "${topic}", let's synthesize ${lastMsgSnippet} with our core objectives so we reach actionable consensus.`,
+      `That touches a vital angle on "${topic}". Let's ensure both short-term trade-offs and structural governance are evaluated.`,
+      `Well noted. Before we conclude on "${topic}", who can offer an execution perspective that hasn't been raised yet?`,
+      `Let's keep the focus on "${topic}". Building upon that thought, how do we practically operationalize this recommendation?`,
     ],
     data_nerd: [
-      `Looking at the empirical numbers, recent studies show a 34% variance between theoretical models and real-world adoption here. We need concrete metrics before drawing conclusions.`,
-      `Let's look at the unit economics. The data indicates that early adopters saw efficiency gains, but customer churn remained flat at 12%. That challenges that premise.`,
-      `I agree in principle, but the statistical evidence is mixed. Without accounting for sample bias, we risk over-generalizing from isolated case studies.`,
+      `Looking at the empirical benchmarks for "${topic}", studies show a 34% variance between projection and actual adoption. We need concrete metrics.`,
+      `Let's look at the unit economics in "${topic}". The data indicates that early adopters saw efficiency gains, but customer churn remained flat at 12%.`,
+      `I agree with the direction, but the statistical evidence on "${topic}" is nuanced. Without accounting for sample bias, we risk false correlation.`,
+      `Analyzing industry KPIs for "${topic}", implementation costs typically scale 2.5x higher than initial pilot forecasts.`,
     ],
     dominator: [
-      `I have to strongly push back on that. That assumption completely overlooks operational reality in high-pressure markets! We cannot afford to be passive here.`,
-      `That sounds noble, but in practice it collapses immediately. If we don't take an aggressive, proactive stance right now, competitors will wipe out the advantage.`,
-      `Let's cut through the theory—the decisive factor here is speed and execution. Sitting on the fence will guarantee failure.`,
+      `I have to strongly challenge ${lastMsgSnippet}! In real-world deployment of "${topic}", passive strategies get crushed by market speed!`,
+      `That sounds cautious, but it guarantees failure. If we don't take a decisive, first-mover position on "${topic}", competitors will own the space.`,
+      `Let's cut through theoretical hesitation on "${topic}". Speed of execution is the only metric that separates winners from losers here.`,
+      `We can't afford incrementalism. When tackling "${topic}", bold disruption is the only defensible strategy.`,
     ],
     quiet_one: [
-      `If I may add a quieter observation... beyond the immediate economic calculations, we shouldn't forget the human dignity and ethical dimension of this choice.`,
-      `I notice we have been focusing primarily on the loudest symptoms, but perhaps the root cause lies in how incentives were aligned in the first place.`,
-      `Perhaps the real solution is not choosing between either extreme, but finding an adaptive middle ground where both principles coexist.`,
+      `If I may offer an overlooked nuance to "${topic}"... beyond immediate numbers, what are the cultural and human ramifications?`,
+      `I notice we are addressing the symptoms of "${topic}", but perhaps the root cause lies in misaligned structural incentives.`,
+      `Perhaps our approach to "${topic}" shouldn't be binary. The most resilient solutions bridge these competing paradigms.`,
+      `Let's not forget the long-term ethical implications of our decisions on "${topic}". Trust is much harder to rebuild than speed.`,
     ],
     devils_advocate: [
-      `Everyone seems to agree, which makes me skeptical. What happens when the secondary unintended consequences kick in and reverse our progress?`,
-      `Consider the reverse hypothesis: what if what we perceive as a threat is actually the exact catalyst needed for necessary disruption?`,
-      `Playing devil's advocate for a moment—if this solution is so obvious, why hasn't any leading organization successfully sustained it yet?`,
+      `Everyone seems to accept that premise on "${topic}", which makes me skeptical. What happens when the secondary unintended consequences kick in?`,
+      `Consider the reverse hypothesis: what if what we perceive as a risk in "${topic}" is actually the exact catalyst needed for innovation?`,
+      `Playing devil's advocate—if this strategy for "${topic}" is so straightforward, why have previous industry pioneers failed to sustain it?`,
+      `What if the fundamental assumption behind "${topic}" is outdated in the current macroeconomic reality?`,
+    ],
+    strategist: [
+      `Connecting this to the macro roadmap for "${topic}", we must look at 3-year platform defensibility rather than quick tactical patches.`,
+      `From an organizational scale perspective on "${topic}", alignment between regulatory compliance and resource allocation is crucial.`,
+      `To ensure defensibility in "${topic}", we need phased milestones. Phase one must de-risk adoption before capital expenditure scales.`,
+      `The competitive moat in "${topic}" won't come from technology alone, but from ecosystem integration and network effects.`,
     ],
   };
 
   const pool = responsesByPersona[selected.id] || responsesByPersona['moderator'];
-  const dialogue = pool[Math.floor(Math.random() * pool.length)];
+
+  // Anti-repetition: filter out any responses already present in transcript
+  const alreadySpoken = new Set(transcript.map(m => m.text.trim().toLowerCase()));
+  const unsaid = pool.filter(d => !alreadySpoken.has(d.trim().toLowerCase()));
+  const candidates = unsaid.length > 0 ? unsaid : pool;
+  const dialogue = candidates[Math.floor(Math.random() * candidates.length)];
 
   return {
     speaker: selected.name,
