@@ -145,7 +145,11 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                 <span>Discussion Language</span>
               </div>
               <span className="text-xs px-2.5 py-1 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 rounded-full font-mono">
-                {selectedLanguage === 'Hindi' ? '🇮🇳 Hindi (hi-IN)' : '🌐 English (en-IN)'}
+                {selectedLanguage === 'Hindi'
+                  ? '🇮🇳 Hindi (hi-IN)'
+                  : selectedLanguage === 'Hinglish'
+                  ? '🗣️ Hinglish (en-IN)'
+                  : '🌐 English (en-IN)'}
               </span>
             </div>
 
@@ -153,11 +157,11 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
               <label className="block text-xs uppercase tracking-wider text-slate-400 font-medium">
                 Select Speech & LLM Language Engine
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button
                   type="button"
                   onClick={() => setSelectedLanguage('English')}
-                  className={`flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
+                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
                     selectedLanguage === 'English'
                       ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-500/40'
                       : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
@@ -171,21 +175,37 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedLanguage('Hindi')}
-                  className={`flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
+                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
                     selectedLanguage === 'Hindi'
                       ? 'bg-amber-600 border-amber-500 text-white shadow-lg shadow-amber-600/30 ring-2 ring-amber-500/40'
                       : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
                   }`}
                 >
                   <span className="text-base">🇮🇳</span>
-                  <span>Hindi (हिंदी)</span>
+                  <span>Hindi</span>
                   <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300">hi-IN</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedLanguage('Hinglish')}
+                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
+                    selectedLanguage === 'Hinglish'
+                      ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-500/40'
+                      : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+                  }`}
+                >
+                  <span className="text-base">🗣️</span>
+                  <span>Hinglish</span>
+                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300">en-IN</span>
                 </button>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
                 {selectedLanguage === 'Hindi'
-                  ? '🤖 AI participants will speak in Hindi (Devanagari script). Web Speech STT and TTS calibrated to hi-IN.'
-                  : '🤖 AI participants will debate in English. Web Speech STT and TTS calibrated to en-IN.'}
+                  ? '🇮🇳 AI participants speak in Hindi (Devanagari script). Web Speech STT & TTS calibrated to hi-IN.'
+                  : selectedLanguage === 'Hinglish'
+                  ? '🗣️ Conversational mix of Hindi & English written in Roman/English alphabet. Web Speech STT & TTS calibrated to en-IN.'
+                  : '🌐 AI participants debate in English. Web Speech STT & TTS calibrated to en-IN.'}
               </p>
             </div>
           </div>

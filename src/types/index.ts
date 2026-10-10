@@ -25,7 +25,7 @@ export interface Participant {
   isUser: boolean;
 }
 
-export type DiscussionLanguage = 'English' | 'Hindi';
+export type DiscussionLanguage = 'English' | 'Hindi' | 'Hinglish';
 
 export interface SessionConfig {
   topic: string;

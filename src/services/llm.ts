@@ -1,4 +1,4 @@
-import type { Message, Participant, FeedbackReportData } from '../types';
+import type { Message, Participant, FeedbackReportData, DiscussionLanguage } from '../types';
 
 export interface NextSpeakerResponse {
   speaker: string;
@@ -27,7 +27,7 @@ export async function getNextSpeakerTurn(
   transcript: Message[],
   lastSpeakerName?: string,
   targetSpeaker?: Participant,
-  language: 'English' | 'Hindi' = 'English'
+  language: DiscussionLanguage = 'English'
 ): Promise<NextSpeakerResponse> {
   const apiKey = getStoredApiKey();
 
@@ -48,6 +48,15 @@ export async function getNextSpeakerTurn(
 
   const currentTopic = topic?.trim() || 'General Group Discussion';
 
+  let languageInstruction = '';
+  if (language === 'English') {
+    languageInstruction = 'Conduct the discussion entirely in formal English.';
+  } else if (language === 'Hindi') {
+    languageInstruction = 'Conduct the discussion entirely in Hindi using the Devanagari script.';
+  } else if (language === 'Hinglish') {
+    languageInstruction = `Conduct the discussion in 'Hinglish' (a natural conversational mix of Hindi and English). CRITICAL INSTRUCTION: You MUST write the Hindi words using the Roman/English alphabet (e.g., 'Main is point se agree karta hu, but we need better execution'). DO NOT use the Devanagari script under any circumstances for Hinglish, otherwise the Text-to-Speech engine will crash.`;
+  }
+
   // 1. Stronger System Prompt (Context Anchoring, Language & Strict Rules)
   const systemPrompt = `You are participating in a Group Discussion.
 The current Group Discussion topic is exactly: "${currentTopic}". You MUST strictly align your vocabulary, arguments, and examples with this specific topic. Do not use generic corporate business jargon unless the topic is explicitly about business/finance. If the topic is general (like Mobile Phones), use relatable, everyday examples.
@@ -57,7 +66,7 @@ Persona Guidelines: ${personaInstruction}
 
 Adapt your persona to the topic. If you are "The Data Nerd" and the topic is Mobile Phones, quote data about screen time, mental health, or global sales, NOT corporate financial KPIs.
 
-CRITICAL RULE 1: The user has chosen to conduct this group discussion in ${language}. You MUST generate your entire response ONLY in ${language}. If Hindi is selected, use Devanagari script.
+CRITICAL RULE 1: ${languageInstruction}
 
 CRITICAL RULE 2: Speak naturally. DO NOT repeat the full topic name in your responses. Refer to the topic naturally using pronouns (e.g., 'this issue').
 
@@ -83,11 +92,12 @@ Full Transcript of the Group Discussion so far:
 ${transcriptHistory}
 
 Instructions for ${personaName}:
-1. Address the latest points in the transcript directly in ${language}.
-2. Speak naturally and refer to the topic using pronouns rather than repeating the full topic name.
-3. Advance the discussion with a distinct, fresh perspective or constructive challenge in 2-3 sentences max.
-4. If the last user statement is gibberish or an STT error, politely ask for clarification in ${language}.
-5. Output strictly the JSON object.`;
+1. ${languageInstruction}
+2. Address the latest points in the transcript directly.
+3. Speak naturally and refer to the topic using pronouns rather than repeating the full topic name.
+4. Advance the discussion with a distinct, fresh perspective or constructive challenge in 2-3 sentences max.
+5. If the last user statement is gibberish or an STT error, politely ask for clarification.
+6. Output strictly the JSON object.`;
 
   try {
     // 2. Tweak API Parameters: temperature 0.8, frequency_penalty 0.5, presence_penalty 0.5
@@ -312,7 +322,7 @@ function simulateNextTurn(
   transcript: Message[],
   lastSpeakerName?: string,
   targetSpeaker?: Participant,
-  language: 'English' | 'Hindi' = 'English'
+  language: DiscussionLanguage = 'English'
 ): NextSpeakerResponse {
   let selected = targetSpeaker;
   if (!selected) {
@@ -333,6 +343,8 @@ function simulateNextTurn(
         speaker: selected.name,
         dialogue: language === 'Hindi'
           ? 'माफ़ कीजिए, मैं आपकी बात ठीक से समझ नहीं पाया। क्या आप अपना विचार दोबारा संक्षेप में रख सकते हैं?'
+          : language === 'Hinglish'
+          ? "Sorry, main aapka point properly catch nahi kar paya. Could you please repeat your point briefly?"
           : "I didn't quite catch that, could you repeat your point?",
       };
     }
@@ -537,9 +549,90 @@ function simulateNextTurn(
     ],
   };
 
+  // Hinglish Dialogue Pools (100% Roman Alphabet / English Script, ZERO Devanagari)
+  const hinglishMobileResponses: Record<string, string[]> = {
+    moderator: [
+      `Is issue par, let's balance modern convenience with screen addiction and mental health concerns.`,
+      `Ye point kaafi valid hai. Ek taraf instant communication aur emergency help hai, dusri taraf constant distraction.`,
+      `Well noted. Discussion ko wrap karne se pehle, koi practical digital boundary share karna chahega jo abhi tak discuss nahi hui?`,
+      `Let's keep our focus balanced: mobile tech ke benefits ko utilize karte hue distractions ko manage karna.`,
+    ],
+    data_nerd: [
+      `Agar hum research metrics dekhe, average person din me 4.5 hours se zyada screen time spend karta hai aur 70 times notifications check karta hai.`,
+      `Sleep health studies prove karti hai ki late-night blue light exposure se melatonin level 22% drop ho jata hai, disrupting deep sleep.`,
+      `On the positive side, global smartphone connectivity ki wajah se 2 billion se zyada log direct online learning aur UPI payments use kar rahe hai.`,
+      `Cognitive studies highlight karti hai ki study ya work ke time phone paas rakhne se working memory capacity 10% tak reduce ho sakti hai.`,
+    ],
+    dominator: [
+      `Main strongly disagree karta hu! Phone ko blame karna is just an excuse for lack of self-discipline. Used smartly, ye sabse powerful tool hai!`,
+      `Hume reality accept karni chahiye—aaj bina mobile ke emergency help, payments ya daily navigation totally stop ho jayega!`,
+      `Problem phone me nahi, mindless scrolling habits me hai. Focused log isse career build kar rahe hai, na ki time waste!`,
+      `Sirf drawbacks count karne se kuch nahi hoga. Mobile phones ne information aur learning ko truly democratize kiya hai!`,
+    ],
+    quiet_one: [
+      `Agar main ek quiet observation add karu... screen se constantly glued rehne ki wajah se hum face-to-face genuine empathy lose kar rahe hai.`,
+      `Mujhe lagta hai convenience ke chakkar me humari patience aur deep attention span ka sabse bada loss hua hai.`,
+      `Real question ye hai ki kya hum phone control kar rahe hai, ya phone ke notifications humare mind ko control kar rahe hai.`,
+      `Beyond convenience, hume ye bhi notice karna hoga ki family members aur friends ke beech emotional disconnect badh raha hai.`,
+    ],
+    devils_advocate: [
+      `Sab agree kar rahe hai ki connectivity badhi hai, but kya real conversations deeper hui hai ya sirf superficial texting ban ke reh gayi hai?`,
+      `Think about this: jo device humara time save karne ke liye bana tha, wahi aaj humara daily time sabse zyada consume kar raha hai.`,
+      `Agar internet aur smartphones ne hume smarter banaya hai, toh global attention spans aur reading depth drop kyu ho rahi hai?`,
+      `Kya smartphones hume truly independent bana rahe hai, ya hum algorithms ke convenience par over-dependent ho gaye hai?`,
+    ],
+    strategist: [
+      `Practical solution ye hai ki hum phone drop karne ke bajay digital discipline adopt kare—like notification curfews aur screen-free meal times.`,
+      `Long-term impact ke liye schools aur colleges me digital wellness literacy introduce karna sabse effective step hoga.`,
+      `Unnecessary app alerts disable karke aur purpose-driven usage adopt karke hum benefits enjoy kar sakte hai without the harm.`,
+      `Healthy balance ke liye personal willpower aur smart digital habits dono combine hone chahiye.`,
+    ],
+  };
+
+  const hinglishGeneralResponses: Record<string, string[]> = {
+    moderator: [
+      `Is point par, let's synthesize both perspectives taaki hum ek balanced conclusion tak reach kar sake.`,
+      `Ye kaafi vital perspective hai. Hume individual impact aur broader social responsibility dono consider karni chahiye.`,
+      `Well noted. Kya koi participant ek relatable everyday example offer kar sakta hai to back this point?`,
+      `Discussion ko constructive rakhte hue, let's explore practical next steps jo realistic ho.`,
+    ],
+    data_nerd: [
+      `Recent survey benchmarks indicate karte hai ki 60% se zyada respondents is matter ko daily routine me face karte hai.`,
+      `Behavioral studies show karti hai ki abrupt bans ke bajay gradual habit shifts yield 3 times higher long-term consistency.`,
+      `Ground-level data shows a clear pattern: clear awareness aur habit tracking se positive outcomes 28% improve hote hai.`,
+      `Different age demographics ke perspectives me significant variation notice hoti hai based on empirical feedback.`,
+    ],
+    dominator: [
+      `Main is hesitation se bilkul agree nahi karta! Clear mindset aur proactive ownership hi actual results create karte hai!`,
+      `Over-thinking se problem solve nahi hogi. Bold decision-making aur immediate execution are what set winners apart!`,
+      `Theory discuss karne ke bajay practical ground execution pe focus karna hoga!`,
+      `Half-hearted attempts se progress nahi hoti. We need strong conviction and full commitment here!`,
+    ],
+    quiet_one: [
+      `Agar main ek human angle add karu... surface arguments ke beyond, hume long-term well-being aur trust ko value karna chahiye.`,
+      `Often hum symptoms pe debate karte hai, jabki root cause humari daily priorities aur mindset me hoti hai.`,
+      `Resilient solutions hamesha balanced middle ground se aati hai rather than extreme positions.`,
+      `Short-term speed ke comparison me mutual understanding aur sustainable habits hamesha zyada matter karti hai.`,
+    ],
+    devils_advocate: [
+      `Sab log easily agree kar rahe hai, which makes me question the premise. Kya hum unintended downsides ko ignore kar rahe hai?`,
+      `Opposite angle consider karo: what if jisko hum limitation samajh rahe hai, wahi actually innovation ka trigger ho?`,
+      `Agar ye solution itna straightforward hai, toh common practice me ye naturally adopt kyu nahi hua?`,
+      `Are we making decisions based on old assumptions jo modern fast-moving reality me fit nahi hoti?`,
+    ],
+    strategist: [
+      `Bigger picture dekhe toh quick tactical patches ke bajay sustainable long-term habits build karni chahiye.`,
+      `Consistent daily execution aur realistic milestones decide karte hai ki plan succeed hoga ya nahi.`,
+      `Phased roadmap best rehta hai: first build genuine awareness, then establish clear community guidelines.`,
+      `Reliable success hamesha disciplined self-regulation aur supportive environment ke combination se aati hai.`,
+    ],
+  };
+
   let chosenPools: Record<string, string[]>;
   if (language === 'Hindi') {
     chosenPools = isMobileTopic ? hindiMobileResponses : hindiGeneralResponses;
+  } else if (language === 'Hinglish') {
+    chosenPools = isMobileTopic ? hinglishMobileResponses : hinglishGeneralResponses;
   } else {
     if (isMobileTopic) {
       chosenPools = englishMobileResponses;

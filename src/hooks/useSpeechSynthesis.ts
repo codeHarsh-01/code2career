@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { Participant } from '../types';
+import type { Participant, DiscussionLanguage } from '../types';
 
 interface UseSpeechSynthesisOptions {
-  language?: 'English' | 'Hindi';
+  language?: DiscussionLanguage;
 }
 
 export function useSpeechSynthesis({ language = 'English' }: UseSpeechSynthesisOptions = {}) {

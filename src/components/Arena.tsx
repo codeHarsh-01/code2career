@@ -126,7 +126,13 @@ export const Arena: React.FC<ArenaProps> = ({
 
           {/* Discussion Language Badge */}
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold shrink-0">
-            <span>{config.language === 'Hindi' ? '🇮🇳 Hindi (hi-IN)' : '🌐 English (en-IN)'}</span>
+            <span>
+              {config.language === 'Hindi'
+                ? '🇮🇳 Hindi (hi-IN)'
+                : config.language === 'Hinglish'
+                ? '🗣️ Hinglish (en-IN)'
+                : '🌐 English (en-IN)'}
+            </span>
           </div>
 
           <div className="h-4 w-px bg-slate-700 hidden sm:block" />
