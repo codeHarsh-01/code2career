@@ -9,10 +9,11 @@ import {
   Zap,
   Play,
   Volume2,
+  Languages,
 } from 'lucide-react';
 import { PRESET_TOPICS } from '../constants/topics';
 import { AI_PERSONALITIES } from '../constants/personalities';
-import type { Participant, SessionConfig } from '../types';
+import type { Participant, SessionConfig, DiscussionLanguage } from '../types';
 
 interface SetupScreenProps {
   onStartSession: (config: SessionConfig) => void;
@@ -26,6 +27,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
   const [customTopicText, setCustomTopicText] = useState<string>('');
   const [participantCount, setParticipantCount] = useState<number>(3);
   const [userName, setUserName] = useState<string>('Candidate');
+  const [selectedLanguage, setSelectedLanguage] = useState<DiscussionLanguage>('English');
   const [isRequestingMic, setIsRequestingMic] = useState<boolean>(false);
 
   const isCustomTopic = selectedTopicId === 'custom';
@@ -59,6 +61,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
       userName: userName.trim() || 'Candidate',
       selectedPersonalities,
       durationSeconds: 600, // 10 minutes session
+      language: selectedLanguage,
     };
 
     onStartSession(config);
@@ -131,6 +134,59 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                   {PRESET_TOPICS.find((t) => t.id === selectedTopicId)?.context}
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Card: Discussion Language Selection */}
+          <div className="p-6 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm">
+                <Languages className="w-4 h-4" />
+                <span>Discussion Language</span>
+              </div>
+              <span className="text-xs px-2.5 py-1 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 rounded-full font-mono">
+                {selectedLanguage === 'Hindi' ? '🇮🇳 Hindi (hi-IN)' : '🌐 English (en-IN)'}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs uppercase tracking-wider text-slate-400 font-medium">
+                Select Speech & LLM Language Engine
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedLanguage('English')}
+                  className={`flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
+                    selectedLanguage === 'English'
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-500/40'
+                      : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+                  }`}
+                >
+                  <span className="text-base">🌐</span>
+                  <span>English</span>
+                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300">en-IN</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedLanguage('Hindi')}
+                  className={`flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
+                    selectedLanguage === 'Hindi'
+                      ? 'bg-amber-600 border-amber-500 text-white shadow-lg shadow-amber-600/30 ring-2 ring-amber-500/40'
+                      : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+                  }`}
+                >
+                  <span className="text-base">🇮🇳</span>
+                  <span>Hindi (हिंदी)</span>
+                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300">hi-IN</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                {selectedLanguage === 'Hindi'
+                  ? '🤖 AI participants will speak in Hindi (Devanagari script). Web Speech STT and TTS calibrated to hi-IN.'
+                  : '🤖 AI participants will debate in English. Web Speech STT and TTS calibrated to en-IN.'}
+              </p>
             </div>
           </div>
 

@@ -25,12 +25,15 @@ export interface Participant {
   isUser: boolean;
 }
 
+export type DiscussionLanguage = 'English' | 'Hindi';
+
 export interface SessionConfig {
   topic: string;
   aiCount: number;
   userName: string;
   selectedPersonalities: Participant[];
   durationSeconds: number;
+  language: DiscussionLanguage;
 }
 
 export interface MetricFeedback {

@@ -1,12 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Participant } from '../types';
 
-export function useSpeechSynthesis() {
+interface UseSpeechSynthesisOptions {
+  language?: 'English' | 'Hindi';
+}
+
+export function useSpeechSynthesis({ language = 'English' }: UseSpeechSynthesisOptions = {}) {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [currentSpeaker, setCurrentSpeaker] = useState<string | null>(null);
 
   const voiceMapRef = useRef<Map<string, SpeechSynthesisVoice>>(new Map());
+
+  // Clear cached voice mappings when language changes
+  useEffect(() => {
+    voiceMapRef.current.clear();
+  }, [language]);
 
   // Load available browser voices
   useEffect(() => {
@@ -34,21 +43,23 @@ export function useSpeechSynthesis() {
     };
   }, []);
 
-  // Assign distinct voices to participants
+  // Assign distinct voices to participants based on language & persona
   const getVoiceForParticipant = useCallback((participant: Participant): SpeechSynthesisVoice | null => {
     if (voices.length === 0) return null;
 
-    if (voiceMapRef.current.has(participant.id)) {
-      return voiceMapRef.current.get(participant.id)!;
+    const cacheKey = `${participant.id}-${language}`;
+    if (voiceMapRef.current.has(cacheKey)) {
+      return voiceMapRef.current.get(cacheKey)!;
     }
 
-    // Filter English voices first
-    const englishVoices = voices.filter(v => v.lang.startsWith('en'));
-    const pool = englishVoices.length > 0 ? englishVoices : voices;
+    // Filter by selected language
+    const langPrefix = language === 'Hindi' ? 'hi' : 'en';
+    const languageVoices = voices.filter(v => v.lang.toLowerCase().startsWith(langPrefix));
+    const pool = languageVoices.length > 0 ? languageVoices : voices;
 
     // Try finding gender matches by name hints (e.g. David, Mark, George, Samantha, Zira, Susan)
-    const femaleHints = ['female', 'samantha', 'zira', 'susan', 'karen', 'victoria', 'natural (female)'];
-    const maleHints = ['male', 'david', 'mark', 'george', 'guy', 'daniel', 'natural (male)'];
+    const femaleHints = ['female', 'samantha', 'zira', 'susan', 'karen', 'victoria', 'natural (female)', 'kalpana', 'swara'];
+    const maleHints = ['male', 'david', 'mark', 'george', 'guy', 'daniel', 'natural (male)', 'madhav', 'hemant'];
 
     let matchedVoice: SpeechSynthesisVoice | undefined;
 
@@ -69,11 +80,11 @@ export function useSpeechSynthesis() {
     }
 
     if (matchedVoice) {
-      voiceMapRef.current.set(participant.id, matchedVoice);
+      voiceMapRef.current.set(cacheKey, matchedVoice);
     }
 
     return matchedVoice || pool[0] || null;
-  }, [voices]);
+  }, [voices, language]);
 
   const speak = useCallback(
     (
@@ -97,6 +108,8 @@ export function useSpeechSynthesis() {
         utterance.voice = voice;
       }
 
+      // Dynamic Speech API Configuration: Set utterance.lang = selectedLanguage === 'Hindi' ? 'hi-IN' : 'en-IN'
+      utterance.lang = language === 'Hindi' ? 'hi-IN' : 'en-IN';
       utterance.pitch = participant.voiceConfig.pitch;
       utterance.rate = participant.voiceConfig.rate;
 
@@ -121,7 +134,7 @@ export function useSpeechSynthesis() {
 
       window.speechSynthesis.speak(utterance);
     },
-    [getVoiceForParticipant]
+    [getVoiceForParticipant, language]
   );
 
   const cancel = useCallback(() => {

@@ -26,13 +26,14 @@ export async function getNextSpeakerTurn(
   participants: Participant[],
   transcript: Message[],
   lastSpeakerName?: string,
-  targetSpeaker?: Participant
+  targetSpeaker?: Participant,
+  language: 'English' | 'Hindi' = 'English'
 ): Promise<NextSpeakerResponse> {
   const apiKey = getStoredApiKey();
 
   // If no API key is provided, use the high-quality local simulated GD engine
   if (!apiKey) {
-    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
+    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker, language);
   }
 
   const personaName = targetSpeaker ? targetSpeaker.name : participants[0].name;
@@ -45,13 +46,22 @@ export async function getNextSpeakerTurn(
         .map((m, idx) => `[Turn ${idx + 1}] ${m.speaker}: "${m.text}"`)
         .join('\n');
 
-  // 1. Stronger System Prompt (Context Anchoring & Anti-Repetition)
+  // 1. Stronger System Prompt (Context Anchoring, Language & Strict Rules)
   const systemPrompt = `You are participating in a Group Discussion. The strict topic is: "${topic}". You must stay absolutely focused on this topic.
 
 You are playing the role of: ${personaName} (${personaRole}). Act according to this persona.
 Persona Guidelines: ${personaInstruction}
 
-CRITICAL: Read the transcript provided. DO NOT repeat what has already been said. Do not just agree with the previous speaker. You must introduce a NEW argument, disagree constructively, or bring a new data point to push the conversation forward. Speak concisely in 2-3 sentences max.
+CRITICAL RULE 1: The user has chosen to conduct this group discussion in ${language}. You MUST generate your entire response ONLY in ${language}. If Hindi is selected, use Devanagari script.
+
+CRITICAL RULE 2: Speak naturally. DO NOT repeat the full topic name in your responses. Refer to the topic naturally using pronouns (e.g., 'this issue').
+
+CRITICAL RULE 3: If the User's input is gibberish, grammatically broken, or looks like a speech-to-text error, DO NOT repeat their nonsense words. Instead, have the AI politely ask for clarification (e.g., 'I didn't quite catch that, could you repeat your point?').
+
+ANTI-REPETITION REQUIREMENT:
+- Read the transcript provided. DO NOT repeat what has already been said.
+- Do not just agree with the previous speaker. You must introduce a NEW argument, disagree constructively, or bring a new data point to push the conversation forward.
+- Speak concisely in 2-3 sentences max (under 45 words).
 
 OUTPUT REQUIREMENT:
 Return ONLY a valid, parseable JSON object matching this schema:
@@ -61,15 +71,16 @@ Return ONLY a valid, parseable JSON object matching this schema:
 }`;
 
   const userPrompt = `Strict GD Topic: "${topic}"
+Discussion Language: ${language}
 
 Full Transcript of the Group Discussion so far:
 ${transcriptHistory}
 
 Instructions for ${personaName}:
-1. Address the latest points in the transcript directly.
-2. Advance the discussion on "${topic}" with a distinct, fresh perspective or constructive challenge.
-3. Keep your statement to 2-3 sentences max (under 45 words).
-4. DO NOT repeat phrases, arguments, or data points already in the transcript.
+1. Address the latest points in the transcript directly in ${language}.
+2. Speak naturally and refer to the topic using pronouns rather than repeating the full topic name.
+3. Advance the discussion with a distinct, fresh perspective or constructive challenge in 2-3 sentences max.
+4. If the last user statement is gibberish or an STT error, politely ask for clarification in ${language}.
 5. Output strictly the JSON object.`;
 
   try {
@@ -97,7 +108,7 @@ Instructions for ${personaName}:
     if (!response.ok) {
       const errText = await response.text();
       console.warn('Groq API call failed, falling back to simulation:', errText);
-      return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
+      return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker, language);
     }
 
     const data = await response.json();
@@ -114,10 +125,10 @@ Instructions for ${personaName}:
       };
     }
 
-    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
+    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker, language);
   } catch (error) {
     console.error('Error fetching next speaker from Groq:', error);
-    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker);
+    return simulateNextTurn(topic, participants, transcript, lastSpeakerName, targetSpeaker, language);
   }
 }
 
@@ -290,13 +301,13 @@ function cleanAndParseJson<T>(raw: string): T | null {
  * Realistic dynamic simulator for demoing and offline hackathon presentation
  */
 function simulateNextTurn(
-  topic: string,
+  _topic: string,
   participants: Participant[],
   transcript: Message[],
   lastSpeakerName?: string,
-  targetSpeaker?: Participant
+  targetSpeaker?: Participant,
+  language: 'English' | 'Hindi' = 'English'
 ): NextSpeakerResponse {
-  // If a target speaker is specified, use them directly
   let selected = targetSpeaker;
   if (!selected) {
     const eligible = participants.filter(p => p.name !== lastSpeakerName);
@@ -306,47 +317,102 @@ function simulateNextTurn(
   }
 
   const lastMsg = transcript.length > 0 ? transcript[transcript.length - 1] : null;
-  const lastMsgSnippet = lastMsg ? `"${lastMsg.text.slice(0, 35)}..."` : 'the core premise';
 
-  const responsesByPersona: Record<string, string[]> = {
+  // CRITICAL RULE 3: Check if last user speech looks like broken STT / gibberish (< 4 chars or mostly noise)
+  if (lastMsg && lastMsg.isUser) {
+    const cleanUserText = lastMsg.text.trim();
+    const isGibberish = cleanUserText.length < 4 || /^[^a-zA-Z0-9\u0900-\u097F]+$/.test(cleanUserText);
+    if (isGibberish) {
+      return {
+        speaker: selected.name,
+        dialogue: language === 'Hindi'
+          ? 'माफ़ कीजिए, मैं आपकी बात ठीक से समझ नहीं पाया। क्या आप अपना विचार दोबारा संक्षेप में रख सकते हैं?'
+          : "I didn't quite catch that, could you repeat your point?",
+      };
+    }
+  }
+
+  // English Persona Dialogue (Natural pronouns, no full topic repetition)
+  const englishResponses: Record<string, string[]> = {
     moderator: [
-      `Regarding "${topic}", let's synthesize ${lastMsgSnippet} with our core objectives so we reach actionable consensus.`,
-      `That touches a vital angle on "${topic}". Let's ensure both short-term trade-offs and structural governance are evaluated.`,
-      `Well noted. Before we conclude on "${topic}", who can offer an execution perspective that hasn't been raised yet?`,
-      `Let's keep the focus on "${topic}". Building upon that thought, how do we practically operationalize this recommendation?`,
+      `Regarding this issue, let's synthesize the points raised so far so we can build toward an actionable consensus.`,
+      `That touches a vital angle on this subject. Let's ensure both immediate trade-offs and structural governance are evaluated.`,
+      `Well noted. Before we conclude, who can offer an operational perspective that hasn't been brought up yet?`,
+      `Let's keep our focus sharp. Building upon that thought, how do we practically execute this recommendation?`,
     ],
     data_nerd: [
-      `Looking at the empirical benchmarks for "${topic}", studies show a 34% variance between projection and actual adoption. We need concrete metrics.`,
-      `Let's look at the unit economics in "${topic}". The data indicates that early adopters saw efficiency gains, but customer churn remained flat at 12%.`,
-      `I agree with the direction, but the statistical evidence on "${topic}" is nuanced. Without accounting for sample bias, we risk false correlation.`,
-      `Analyzing industry KPIs for "${topic}", implementation costs typically scale 2.5x higher than initial pilot forecasts.`,
+      `Looking at the empirical benchmarks on this matter, studies show a 34% variance between projection and actual adoption. We need concrete metrics.`,
+      `Let's look at the unit economics here. The data indicates that early adopters saw efficiency gains, but customer churn remained flat at 12%.`,
+      `I agree with the direction, but the statistical evidence is nuanced. Without accounting for sample bias, we risk false correlation.`,
+      `Analyzing industry KPIs, implementation costs in this sector typically scale 2.5 times higher than initial pilot forecasts.`,
     ],
     dominator: [
-      `I have to strongly challenge ${lastMsgSnippet}! In real-world deployment of "${topic}", passive strategies get crushed by market speed!`,
-      `That sounds cautious, but it guarantees failure. If we don't take a decisive, first-mover position on "${topic}", competitors will own the space.`,
-      `Let's cut through theoretical hesitation on "${topic}". Speed of execution is the only metric that separates winners from losers here.`,
-      `We can't afford incrementalism. When tackling "${topic}", bold disruption is the only defensible strategy.`,
+      `I have to strongly push back on that! In real-world market deployment, passive strategies get crushed by faster competitors!`,
+      `That sounds cautious, but it guarantees failure. If we don't take a decisive, first-mover position on this, competitors will own the space.`,
+      `Let's cut through theoretical hesitation. Speed of execution is the only metric that separates winners from losers here.`,
+      `We cannot afford incrementalism. Bold disruption is the only defensible strategy in this environment!`,
     ],
     quiet_one: [
-      `If I may offer an overlooked nuance to "${topic}"... beyond immediate numbers, what are the cultural and human ramifications?`,
-      `I notice we are addressing the symptoms of "${topic}", but perhaps the root cause lies in misaligned structural incentives.`,
-      `Perhaps our approach to "${topic}" shouldn't be binary. The most resilient solutions bridge these competing paradigms.`,
-      `Let's not forget the long-term ethical implications of our decisions on "${topic}". Trust is much harder to rebuild than speed.`,
+      `If I may offer an overlooked nuance... beyond the immediate financial metrics, what are the cultural and human ramifications?`,
+      `I notice we are addressing the symptoms of this challenge, but perhaps the root cause lies in misaligned structural incentives.`,
+      `Perhaps our approach shouldn't be binary. The most resilient solutions bridge these competing paradigms rather than choosing one.`,
+      `Let's not forget the long-term ethical implications of our decisions here. Public trust is much harder to rebuild than speed.`,
     ],
     devils_advocate: [
-      `Everyone seems to accept that premise on "${topic}", which makes me skeptical. What happens when the secondary unintended consequences kick in?`,
-      `Consider the reverse hypothesis: what if what we perceive as a risk in "${topic}" is actually the exact catalyst needed for innovation?`,
-      `Playing devil's advocate—if this strategy for "${topic}" is so straightforward, why have previous industry pioneers failed to sustain it?`,
-      `What if the fundamental assumption behind "${topic}" is outdated in the current macroeconomic reality?`,
+      `Everyone seems to accept that premise, which makes me skeptical. What happens when the secondary unintended consequences kick in?`,
+      `Consider the reverse hypothesis: what if what we perceive as a threat is actually the exact catalyst needed for innovation?`,
+      `Playing devil's advocate—if this strategy is so straightforward, why have previous industry pioneers failed to sustain it?`,
+      `What if the fundamental assumption guiding our consensus is outdated in the current macroeconomic reality?`,
     ],
     strategist: [
-      `Connecting this to the macro roadmap for "${topic}", we must look at 3-year platform defensibility rather than quick tactical patches.`,
-      `From an organizational scale perspective on "${topic}", alignment between regulatory compliance and resource allocation is crucial.`,
-      `To ensure defensibility in "${topic}", we need phased milestones. Phase one must de-risk adoption before capital expenditure scales.`,
-      `The competitive moat in "${topic}" won't come from technology alone, but from ecosystem integration and network effects.`,
+      `Connecting this to our macro roadmap, we must look at 3-year platform defensibility rather than quick tactical patches.`,
+      `From an organizational scale perspective, alignment between regulatory compliance and resource allocation is where initiatives succeed or fail.`,
+      `To ensure defensibility, we need phased milestones. Phase one must de-risk adoption before capital expenditure scales.`,
+      `The competitive moat won't come from technology alone, but from ecosystem integration and network effects.`,
     ],
   };
 
+  // Hindi Persona Dialogue (Natural pronouns, Devanagari script)
+  const hindiResponses: Record<string, string[]> = {
+    moderator: [
+      `इस मुद्दे पर, आइए हम अब तक रखे गए विचारों को संक्षेप में जोड़ें ताकि हम एक ठोस और व्यावहारिक निष्कर्ष पर पहुँच सकें।`,
+      `यह एक बहुत महत्वपूर्ण दृष्टिकोण है। हमें इसके तात्कालिक प्रभाव और दीर्घकालिक स्थिरता दोनों पर विचार करना चाहिए।`,
+      `आपकी बात सही है। पर क्या किसी के पास इस दृष्टिकोण का समर्थन करने के लिए वास्तविक डेटा या व्यावहारिक अनुभव है?`,
+      `आइए चर्चा को केंद्रित रखें। इस विचार को आगे बढ़ाते हुए, हम इसे ज़मीनी स्तर पर कैसे लागू कर सकते हैं?`,
+    ],
+    data_nerd: [
+      `यदि हम इस मामले के वास्तविक आंकड़ों को देखें, तो हाल के अध्ययनों से पता चलता है कि अनुमान और वास्तविक क्रियान्वयन में 35% का अंतर है।`,
+      `यूनिट इकोनॉमिक्स के दृष्टिकोण से, शुरुआती लागत अनुमान से लगभग दोगुनी हो जाती है। बिना ठोस वित्तीय योजना के यह व्यवहार्य नहीं है।`,
+      `मैं इस दिशा से सहमत हूँ, लेकिन सांख्यिकीय साक्ष्य बताते हैं कि व्यापक स्तर पर अभी भी कई अनिश्चितताएँ हैं।`,
+      `उद्योग के आंकड़ों के अनुसार, समय पर सही डेटा विश्लेषण न होने से 40% संसाधन व्यर्थ हो जाते हैं।`,
+    ],
+    dominator: [
+      `मैं इस बात से पूरी तरह असहमत हूँ! इस प्रतिस्पर्धी माहौल में सुस्त और संकोची रणनीतियाँ तुरंत विफल हो जाती हैं। हमें आक्रामक रुख अपनाना होगा!`,
+      `सिद्धांतों में उलझने के बजाय, हमें तेज निर्णय और निष्पादन पर ध्यान देना चाहिए। झिझक केवल असफलता की गारंटी देगी।`,
+      `सतर्क रहना अच्छी बात है, लेकिन यहाँ केवल गति और साहसिक कदम ही हमें आगे रख सकते हैं!`,
+      `हम आधी-अधूरी कोशिशें नहीं कर सकते। यदि हमें सफल होना है, तो पूरे आत्मविश्वास के साथ आगे बढ़ना होगा!`,
+    ],
+    quiet_one: [
+      `यदि मैं एक शांत पहलू जोड़ सकूँ... तो केवल वित्तीय लाभ के बजाय, हमें मानवीय और नैतिक प्रभावों को भी नहीं भूलना चाहिए।`,
+      `मुझे लगता है कि हम केवल बाहरी लक्षणों पर ध्यान दे रहे हैं, जबकि मूल समस्या हमारी प्राथमिकताओं में है।`,
+      `शायद हमें किसी एक छोर को चुनने के बजाय एक संतुलित और टिकाऊ मध्य मार्ग तलाशना चाहिए।`,
+      `विश्वास और सामाजिक प्रभाव को दरकिनार करके कोई भी योजना लंबे समय तक सफल नहीं हो सकती।`,
+    ],
+    devils_advocate: [
+      `सभी इस प्रस्ताव से सहमत दिख रहे हैं, जो मुझे संदेहास्पद लगता है। क्या हमने इसके अनपेक्षित दुष्प्रभावों पर विचार किया है?`,
+      `इसके विपरीत सोचें: क्या होगा यदि जिसे हम एक बड़ा जोखिम मान रहे हैं, वह वास्तव में नवाचार का सबसे बड़ा अवसर हो?`,
+      `यदि यह समाधान इतना सरल और स्पष्ट है, तो अब तक कोई बड़ा संगठन इसे पूरी तरह लागू क्यों नहीं कर पाया?`,
+      `क्या हम पुरानी मान्यताओं के आधार पर भविष्य का फैसला तो नहीं कर रहे हैं?`,
+    ],
+    strategist: [
+      `दीर्घकालिक दृष्टिकोण से, हमें इस मुद्दे के 3-वर्षीय रोडमैप और नीतिगत ढांचे पर ध्यान केंद्रित करना चाहिए, न कि केवल त्वरित समाधानों पर।`,
+      `किसी भी बड़े बदलाव के लिए चरणबद्ध योजना आवश्यक है। पहले चरण में जोखिम कम करना होगा, फिर विस्तार करना होगा।`,
+      `हमारा वास्तविक लाभ केवल तकनीक से नहीं, बल्कि एक मजबूत और एकीकृत प्रणाली बनाने से आएगा।`,
+      `रणनीतिक सफलता के लिए संसाधनों का सही आवंटन और नियमों का पालन अनिवार्य है।`,
+    ],
+  };
+
+  const responsesByPersona = language === 'Hindi' ? hindiResponses : englishResponses;
   const pool = responsesByPersona[selected.id] || responsesByPersona['moderator'];
 
   // Anti-repetition: filter out any responses already present in transcript

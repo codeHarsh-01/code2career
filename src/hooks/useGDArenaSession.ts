@@ -45,7 +45,9 @@ export function useGDArenaSession({
 
   const isAITurnInProgressRef = useRef<boolean>(false);
 
-  const { speak, cancel: cancelSpeech, isSpeaking: isAISpeaking } = useSpeechSynthesis();
+  const { speak, cancel: cancelSpeech, isSpeaking: isAISpeaking } = useSpeechSynthesis({
+    language: config.language,
+  });
 
   // 3. User Submission Handler (Unlocking the loop)
   const handleUserSubmission = useCallback((text: string) => {
@@ -98,6 +100,7 @@ export function useGDArenaSession({
     onSpeechComplete: handleUserSpeechComplete,
     onSpeechStart: handleUserSpeechStart,
     pauseThresholdMs: 1700,
+    lang: config.language === 'Hindi' ? 'hi-IN' : 'en-IN',
   });
 
   // 2. Dynamic Conversation Loop via React useEffect:
@@ -152,7 +155,8 @@ export function useGDArenaSession({
           config.selectedPersonalities,
           transcriptRef.current,
           undefined,
-          currentAI
+          currentAI,
+          config.language
         );
 
         if (!isEffectActive) return;
@@ -220,6 +224,7 @@ export function useGDArenaSession({
     isTimerRunning,
     config.topic,
     config.selectedPersonalities,
+    config.language,
     userIsMuted,
     startListening,
     speak,

@@ -65,6 +65,13 @@ export function useSpeechRecognition({
   onSpeechCompleteRef.current = onSpeechComplete;
   onSpeechStartRef.current = onSpeechStart;
 
+  // Update recognition language dynamically when lang changes
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = lang;
+    }
+  }, [lang]);
+
   // Initialize SpeechRecognition
   useEffect(() => {
     const SpeechRecognitionAPI =
