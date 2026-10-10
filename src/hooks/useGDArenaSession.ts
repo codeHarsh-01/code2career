@@ -20,6 +20,7 @@ export function useGDArenaSession({
 }: UseGDArenaSessionProps) {
   const [transcript, setTranscript] = useState<Message[]>([]);
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
+  const [preparingSpeaker, setPreparingSpeaker] = useState<string | null>(null);
   const [status, setStatus] = useState<ArenaStatus>('idle');
   const [timeRemaining, setTimeRemaining] = useState<number>(config.durationSeconds);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
@@ -41,6 +42,7 @@ export function useGDArenaSession({
       cancelSpeech();
       setInterruptionsHandled(prev => prev + 1);
     }
+    setPreparingSpeaker(null);
     setActiveSpeaker(config.userName);
     setStatus('listening');
 
@@ -89,6 +91,13 @@ export function useGDArenaSession({
     if (isAITurnInProgressRef.current) return;
     isAITurnInProgressRef.current = true;
 
+    // Determine candidate AI who intends to speak / raises hand while LLM thinks
+    const eligible = config.selectedPersonalities.filter(p => p.name !== lastSpeakerName);
+    const intentPersona = eligible.length > 0
+      ? eligible[Math.floor(Math.random() * eligible.length)]
+      : config.selectedPersonalities[0];
+    setPreparingSpeaker(intentPersona.name);
+
     setStatus('ai_thinking');
     setActiveSpeaker(null);
 
@@ -102,7 +111,7 @@ export function useGDArenaSession({
 
       const speakerPersona = config.selectedPersonalities.find(
         p => p.name.toLowerCase() === response.speaker.toLowerCase()
-      ) || config.selectedPersonalities[0];
+      ) || intentPersona;
 
       const aiMessage: Message = {
         id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -114,6 +123,7 @@ export function useGDArenaSession({
       };
 
       setTranscript(prev => [...prev, aiMessage]);
+      setPreparingSpeaker(null);
       setStatus('ai_speaking');
       setActiveSpeaker(speakerPersona.name);
 
@@ -123,12 +133,14 @@ export function useGDArenaSession({
         speakerPersona,
         () => {
           // On speech start
+          setPreparingSpeaker(null);
           setActiveSpeaker(speakerPersona.name);
           setStatus('ai_speaking');
         },
         () => {
           // On speech finish
           setActiveSpeaker(null);
+          setPreparingSpeaker(null);
           setStatus('idle');
           isAITurnInProgressRef.current = false;
 
@@ -145,6 +157,7 @@ export function useGDArenaSession({
       console.error('Failed AI turn:', err);
       setStatus('idle');
       setActiveSpeaker(null);
+      setPreparingSpeaker(null);
       isAITurnInProgressRef.current = false;
     }
   }, [config.topic, config.selectedPersonalities, speak]);
@@ -236,6 +249,7 @@ export function useGDArenaSession({
     setIsGeneratingFeedback(true);
     setStatus('idle');
     setActiveSpeaker(null);
+    setPreparingSpeaker(null);
 
     const elapsedSeconds = config.durationSeconds - timeRemaining;
     const elapsedMinutes = Math.max(1, Math.round(elapsedSeconds / 60));
@@ -276,6 +290,7 @@ export function useGDArenaSession({
   return {
     transcript,
     activeSpeaker,
+    preparingSpeaker,
     status,
     timeRemaining,
     isTimerRunning,
